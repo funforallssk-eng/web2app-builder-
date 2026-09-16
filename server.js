@@ -1,9 +1,20 @@
+
 const express = require('express');
 const path = require('path');
 const app = express();
 app.use(require('cors')());
 app.use(express.json());
+
+// DISABLE CACHE - Force new version every time
+app.use((req,res,next)=>{
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 app.use(express.static('public'));
+app.use(express.static(__dirname)); // also serve root
 
 const REPO = process.env.GITHUB_REPO || 'funforallssk-eng/web2app-builder-';
 const TOKEN = process.env.GITHUB_TOKEN;
@@ -32,41 +43,31 @@ app.get('/api/check/:buildId', async (req, res) => {
   } catch { res.json({ ready: false }); }
 });
 
-// FIXED DOWNLOAD - Follows GitHub's redirect correctly
 app.get('/api/download/:buildId/:type', async (req, res) => {
   try {
     const { buildId, type } = req.params;
     const list = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100`, {
       headers: { Authorization: `Bearer ${TOKEN}` }
     }).then(r => r.json());
-
     const artifact = list.artifacts.find(a => a.name.includes(buildId) && a.name.toLowerCase().includes(type));
-    if (!artifact) return res.status(404).send('Still building... wait 30 sec and refresh');
-
-    // Step 1: Get redirect URL from GitHub
+    if (!artifact) return res.status(404).send('Building... wait 30s');
     const redirectRes = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {
       headers: { Authorization: `Bearer ${TOKEN}` },
       redirect: 'manual'
     });
-    
     const downloadUrl = redirectRes.headers.get('location');
-    if (!downloadUrl) throw new Error('No download URL from GitHub');
-
-    // Step 2: Download from Azure (no auth needed)
     const fileRes = await fetch(downloadUrl);
-    
     res.setHeader('Content-Disposition', `attachment; filename="${artifact.name}.zip"`);
     res.setHeader('Content-Type', 'application/zip');
-    
-    // Stream it
     const { Readable } = require('stream');
     Readable.fromWeb(fileRes.body).pipe(res);
-
-  } catch (e) {
-    console.error(e);
-    res.status(500).send('Download error: ' + e.message);
-  }
+  } catch (e) { res.status(500).send(e.message); }
 });
 
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(process.env.PORT || 3000, () => console.log('Running'));
+// Force serve NEW public/index.html
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.listen(process.env.PORT || 3000, () => console.log('247 Software Running - No Cache'));
+
