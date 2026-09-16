@@ -1,59 +1,32 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Web2App - Website to App in 3 Mins</title>
-<style>
-*{box-sizing:border-box} body{font-family:system-ui;max-width:700px;margin:40px auto;padding:20px;background:#fafafa}
-.card{background:#fff;padding:30px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
-input{width:100%;padding:14px;margin:10px 0;border:2px solid #e5e7eb;border-radius:10px;font-size:16px}
-button{width:100%;padding:16px;background:#111;color:#fff;border:0;border-radius:10px;font-size:18px;font-weight:600;cursor:pointer;margin-top:10px}
-button:disabled{background:#999}
-#status{margin-top:20px;padding:15px;background:#f3f4f6;border-radius:10px}
-.progress{background:#e5e7eb;height:12px;border-radius:10px;overflow:hidden;margin:12px 0}
-.progress-bar{height:100%;background:#10b981;transition:width 1s}
-.btn{display:inline-block;padding:16px 28px;margin:8px;border-radius:10px;color:#fff;text-decoration:none;font-weight:600}
-</style>
-</head>
-<body>
-<div class="card">
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web2App Builder</title>
+<style>*{box-sizing:border-box}body{font-family:system-ui;max-width:700px;margin:40px auto;padding:20px;background:#fafafa}.card{background:#fff;padding:30px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,.08)}input{width:100%;padding:14px;margin:10px 0;border:2px solid #e5e7eb;border-radius:10px}button{width:100%;padding:16px;background:#111;color:#fff;border:0;border-radius:10px;font-size:18px;font-weight:600;cursor:pointer}button:disabled{background:#999}.btn{display:inline-block;padding:16px 28px;margin:8px;border-radius:10px;color:#fff;text-decoration:none;font-weight:600}</style>
+</head><body><div class="card">
 <h1>🚀 Web2App Builder</h1>
-<p>Convert any website to Android APK + AAB in 3 minutes</p>
-<form id="buildForm">
-<input id="url" placeholder="https://store.cheapodeal.com.au" value="https://store.cheapodeal.com.au" required>
-<input id="appName" placeholder="App Name" value="CheapoDeal" required>
-<input id="packageName" placeholder="com.example.app" value="com.cheapodeal.app" required>
-<button id="buildBtn">Build APK + AAB</button>
-</form>
-<div id="status" style="display:none"></div>
-<div id="downloadArea" style="display:none;text-align:center;margin-top:20px">
+<p>Website → APK + AAB in 3 mins</p>
+<form id="f"><input id="url" value="https://store.cheapodeal.com.au" required><input id="appName" value="CheapoDeal" required><input id="packageName" value="com.cheapodeal.app" required><button id="b">Build APK + AAB</button></form>
+<div id="s" style="margin-top:20px"></div>
+<div id="d" style="display:none;text-align:center;margin-top:20px">
 <h2>✅ Build Ready!</h2>
-<a id="apkBtn" href="#" class="btn" style="background:#10b981">📱 Download APK</a>
-<a id="aabBtn" href="#" class="btn" style="background:#3b82f6">📦 Download AAB (Play Store)</a>
-<p style="margin-top:15px"><small>Install APK directly on phone. Upload AAB to Google Play Console.</small></p>
-</div>
-</div>
+<a id="apk" href="#" class="btn" style="background:#10b981">📱 Download APK</a>
+<a id="aab" href="#" class="btn" style="background:#3b82f6">📦 Download AAB</a>
+</div></div>
 <script>
-const form=document.getElementById('buildForm'), btn=document.getElementById('buildBtn'), status=document.getElementById('status'), dl=document.getElementById('downloadArea');
-form.addEventListener('submit', async(e)=>{
-e.preventDefault(); btn.disabled=true; btn.innerText='⏳ Building...'; status.style.display='block'; dl.style.display='none';
-status.innerHTML='⏳ Build started... This takes 3-4 minutes. Please wait...<div class="progress"><div id="progress" class="progress-bar" style="width:10%"></div></div><small id="timer">0s elapsed</small>';
-let sec=0; const timer=setInterval(()=>{sec+=5; document.getElementById('timer').innerText=sec+'s elapsed (avg 180s)'; document.getElementById('progress').style.width=Math.min(90,10+sec/2)+'%';},5000);
-try{
+document.getElementById('f').addEventListener('submit', async(e)=>{
+e.preventDefault(); const btn=document.getElementById('b'), s=document.getElementById('s'), d=document.getElementById('d');
+btn.disabled=true; btn.innerText='⏳ Building... 3-4 mins'; s.innerHTML='Build started... Please wait 3 mins';
 const payload={url:document.getElementById('url').value, appName:document.getElementById('appName').value, packageName:document.getElementById('packageName').value};
-const res=await fetch('/api/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
-if(!res.success) throw new Error(res.error);
-const checkInt=setInterval(async()=>{
-const check=await fetch('/api/check/'+res.buildId).then(r=>r.json());
-if(check.ready){
-clearInterval(checkInt); clearInterval(timer);
-status.innerHTML='🎉 Build Complete!'; document.getElementById('progress').style.width='100%';
-dl.style.display='block'; document.getElementById('apkBtn').href=check.apkUrl; document.getElementById('aabBtn').href=check.aabUrl;
-btn.disabled=false; btn.innerText='Build Another App';
-}
+try{
+const {buildId}=await fetch('/api/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
+let sec=0; const t=setInterval(()=>{sec+=5; s.innerHTML=`Building... ${sec}s elapsed`},5000);
+const c=setInterval(async()=>{
+const chk=await fetch('/api/check/'+buildId).then(r=>r.json());
+if(chk.ready){clearInterval(c); clearInterval(t);
+s.innerHTML='🎉 Build Complete!'; d.style.display='block';
+document.getElementById('apk').href='/api/download/'+buildId+'/apk';
+document.getElementById('aab').href='/api/download/'+buildId+'/aab';
+btn.disabled=false; btn.innerText='Build Another App';}
 },15000);
-}catch(err){status.innerHTML='❌ '+err.message; btn.disabled=false; btn.innerText='Build APK + AAB'; clearInterval(timer);}
+}catch(err){s.innerHTML='❌ '+err.message; btn.disabled=false;}
 });
-</script>
-</body>
-</html>
+</script></body></html>
