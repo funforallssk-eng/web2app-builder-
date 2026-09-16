@@ -6,7 +6,7 @@ app.use(cors());
 app.use(express.json());
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_REPO = process.env.GITHUB_REPO || 'funforallssk-eng/web2app-builder';
+const GITHUB_REPO = process.env.GITHUB_REPO || 'funforallssk-eng/web2app-builder-';
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req,res)=>{
