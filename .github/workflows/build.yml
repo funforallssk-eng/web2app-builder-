@@ -1,4 +1,4 @@
-name: Build APK AAB Fixed Final
+name: Build APK AAB Final Working
 
 on:
   workflow_dispatch:
@@ -24,14 +24,44 @@ on:
         default: '123'
         type: string
       iconBase64:
-        description: Icon
+        description: Icon base64
         required: false
         default: ''
         type: string
       splashBase64:
-        description: Splash
+        description: Splash base64
         required: false
         default: ''
+        type: string
+      splashBgColor:
+        description: Splash BG
+        required: false
+        default: '#0f172a'
+        type: string
+      iconBgColor:
+        description: Icon BG
+        required: false
+        default: '#0f172a'
+        type: string
+      pullToRefresh:
+        description: Pull refresh
+        required: false
+        default: 'true'
+        type: string
+      splashDuration:
+        description: Splash duration
+        required: false
+        default: '2000'
+        type: string
+      statusBarColor:
+        description: Status bar
+        required: false
+        default: '#0f172a'
+        type: string
+      orientation:
+        description: Orientation
+        required: false
+        default: 'portrait'
         type: string
 
 jobs:
@@ -63,8 +93,9 @@ jobs:
           $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --version
           yes | $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
           $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+          echo "SDK ready"
 
-      - name: Create project dirs
+      - name: Create dirs
         run: |
           rm -rf app build .gradle gradle gradlew settings.gradle build.gradle gradle.properties
           mkdir -p app/src/main/java/com/web2app
@@ -100,7 +131,7 @@ jobs:
             img.save("app/src/main/res/drawable/splash_icon.png")
           PY
 
-      - name: Generate Android files - FIXED GRADLE
+      - name: Make files
         run: |
           cat > settings.gradle << 'EOF'
           include ':app'
@@ -127,7 +158,6 @@ jobs:
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
-          android.nonTransitiveRResources=true
           EOF
 
           cat > app/src/main/res/values/colors.xml << 'EOF'
@@ -177,7 +207,6 @@ jobs:
               buildTypes {
                   release {
                       minifyEnabled false
-                      shrinkResources false
                   }
               }
           }
@@ -190,25 +219,12 @@ jobs:
           EOF
           sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle || true
 
-          echo "=== Generated files ==="
-          cat settings.gradle
-          cat build.gradle
-          cat app/build.gradle
-
-      - name: Build APK AAB - FIXED
+      - name: Build APK AAB
         run: |
           set -e
-          echo "Trying gradle wrapper..."
-          if gradle wrapper --gradle-version 8.5 --no-daemon; then
-            echo "Wrapper created"
-            chmod +x gradlew || true
-            ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
-          else
-            echo "Wrapper failed, using gradle directly"
-            gradle assembleRelease bundleRelease --no-daemon --stacktrace
-          fi
-          echo "Build outputs:"
-          find app/build/outputs -type f || echo "No outputs found"
+          gradle wrapper --gradle-version 8.5 --no-daemon || true
+          chmod +x gradlew || true
+          if [ -f ./gradlew ]; then ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace; else gradle assembleRelease bundleRelease --no-daemon --stacktrace; fi
           ls -lh app/build/outputs/apk/release/ || true
           ls -lh app/build/outputs/bundle/release/ || true
 
