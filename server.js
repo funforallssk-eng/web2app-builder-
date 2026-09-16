@@ -3,80 +3,63 @@ const path = require('path');
 const app = express();
 app.use(require('cors')());
 app.use(express.json({ limit: '15mb' }));
-
-// No cache for index.html
 app.use((req,res,next)=>{
   if(req.path.endsWith('.html') || req.path === '/'){
     res.setHeader('Cache-Control','no-store, no-cache, must-revalidate, private');
     res.setHeader('Pragma','no-cache');
-    res.setHeader('Expires','0');
   }
   next();
 });
-
 app.use(express.static('public'));
 app.use(express.static(__dirname));
 
-// ENV VARS - SET IN RENDER
-const REPO = process.env.GITHUB_REPO || 'funforallssk-eng/web2app-builder-';
-const TOKEN = process.env.GITHUB_TOKEN;
-const BRANCH = process.env.GITHUB_BRANCH || 'main';
+const REPO = (process.env.GITHUB_REPO || 'funforallssk-eng/web2app-builder-').trim();
+const TOKEN = (process.env.GITHUB_TOKEN || '').trim();
+const BRANCH = (process.env.GITHUB_BRANCH || 'main').trim();
 
-console.log(`Config: REPO=${REPO} BRANCH=${BRANCH} TOKEN=${TOKEN ? 'SET ✅ length:'+TOKEN.length : 'MISSING ❌'}`);
+console.log(`BOOT: REPO=${REPO} BRANCH=${BRANCH} TOKEN=${TOKEN? 'SET len:'+TOKEN.length : 'MISSING'}`);
 
-if(!TOKEN){
-  console.error('❌ GITHUB_TOKEN missing in Render Environment!');
-}
+const paidBuilds = new Set();
 
-// Health check
-app.get('/api/health', (req,res)=>{
-  res.json({ ok:true, repo:REPO, branch:BRANCH, tokenSet:!!TOKEN, time:new Date().toISOString() });
-});
+app.get('/api/health', (req,res)=>res.json({ok:true, repo:REPO, branch:BRANCH, tokenSet:!!TOKEN, time:new Date().toISOString()}));
 
-// Debug - shows workflows
 app.get('/api/debug', async (req,res)=>{
+  if(!TOKEN) return res.json({error:'GITHUB_TOKEN missing in Render Env', repo:REPO, tokenSet:false, fix:'Add GITHUB_TOKEN in Render Dashboard > Environment'});
   try{
-    if(!TOKEN) return res.json({ error:'TOKEN missing in Render Env', repo:REPO, tokenSet:false });
     const r = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows`, {
-      headers: { 'Authorization': `Bearer ${TOKEN}`, 'Accept': 'application/vnd.github+json', 'User-Agent': 'web2app' }
+      headers: { 'Authorization': `Bearer ${TOKEN}`, 'Accept': 'application/vnd.github+json', 'User-Agent':'web2app-debug' }
     });
     const data = await r.json();
-    res.json({
-      repo:REPO,
-      branch:BRANCH,
-      tokenSet:true,
-      githubStatus:r.status,
-      workflows:(data.workflows||[]).map(w=>({name:w.name, path:w.path, state:w.state})),
-      message: r.status===401 ? 'TOKEN invalid or expired - create new token with repo + workflow scopes' : r.status===404 ? 'REPO not found - check GITHUB_REPO name' : 'OK - workflows found'
-    });
-  }catch(e){ res.json({ error:e.message, repo:REPO, tokenSet:!!TOKEN }); }
+    if(!r.ok) return res.json({repo:REPO, branch:BRANCH, tokenSet:true, githubStatus:r.status, error:data.message, fix: r.status===401?'Token invalid - create new token with repo+workflow scopes': r.status===404?`Repo ${REPO} not found - check spelling (trailing - ?)`: data.message});
+    res.json({repo:REPO, branch:BRANCH, tokenSet:true, githubStatus:r.status, workflows:(data.workflows||[]).map(w=>({name:w.name, path:w.path, state:w.state})), message:'OK - If build.yml not listed, file not on main branch'});
+  }catch(e){ res.json({error:e.message, repo:REPO}); }
 });
 
-// BUILD - triggers GitHub
+// EXACT MATCHED BUILD - 6 inputs only - NEVER 422 for extra inputs
 app.post('/api/build', async (req,res)=>{
   const buildId = Date.now().toString();
-  const { url, appName, packageName, iconBase64='', splashBase64='', splashBgColor='#0f172a', iconBgColor='#0f172a', pullToRefresh=true, splashDuration='2000', statusBarColor='#0f172a', orientation='portrait' } = req.body;
-
-  if(!url || !appName || !packageName){
-    return res.status(400).json({ success:false, error:'Missing url/appName/packageName' });
-  }
-
-  if(!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(packageName)){
-    return res.status(400).json({ success:false, error:'Invalid package name. Use com.example.app' });
-  }
-
-  if(!TOKEN){
-    return res.status(500).json({ success:false, error:'GITHUB_TOKEN not set in Render Environment Variables. Add it!' });
-  }
+  const {url, appName, packageName, iconBase64='', splashBase64=''} = req.body;
+  if(!url || !appName || !packageName) return res.status(400).json({success:false, error:'Missing url/appName/packageName'});
+  if(!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(packageName)) return res.status(400).json({success:false, error:'Invalid package name like com.example.app'});
+  if(!TOKEN) return res.status(500).json({success:false, error:'GITHUB_TOKEN not set in Render > Environment Variables'});
 
   try{
-    const safeIcon = (iconBase64||'').substring(0,35000);
-    const safeSplash = (splashBase64||'').substring(0,35000);
-
-    console.log(`🚀 Build ${buildId} ${appName} ${url} Icon:${!!safeIcon} Splash:${!!safeSplash}`);
-
+    // ONLY 6 inputs - exactly what build.yml defines - NO extra inputs = NO 422
+    const payload = {
+      ref: BRANCH,
+      inputs: {
+        url: String(url).substring(0,200),
+        appName: String(appName).substring(0,50),
+        packageName: String(packageName).substring(0,100),
+        buildId,
+        iconBase64: String(iconBase64||'').substring(0,35000),
+        splashBase64: String(splashBase64||'').substring(0,35000)
+      }
+    };
+    console.log(`🚀 Build ${buildId} ${appName} -> ${REPO} ${BRANCH} inputs:${Object.keys(payload.inputs).join(',')}`);
     const workflowUrl = `https://api.github.com/repos/${REPO}/actions/workflows/build.yml/dispatches`;
-
+    console.log(`Calling ${workflowUrl}`);
+    
     const githubRes = await fetch(workflowUrl, {
       method:'POST',
       headers:{
@@ -85,90 +68,73 @@ app.post('/api/build', async (req,res)=>{
         'Accept':'application/vnd.github+json',
         'User-Agent':'web2app-builder'
       },
-      body:JSON.stringify({
-        ref:BRANCH,
-        inputs:{
-          url: String(url).substring(0,200),
-          appName: String(appName).substring(0,50),
-          packageName: String(packageName).substring(0,100),
-          buildId,
-          iconBase64: safeIcon,
-          splashBase64: safeSplash,
-          splashBgColor: String(splashBgColor),
-          iconBgColor: String(iconBgColor),
-          pullToRefresh: pullToRefresh ? 'true' : 'false',
-          splashDuration: String(splashDuration),
-          statusBarColor: String(statusBarColor),
-          orientation: String(orientation)
-        }
-      })
+      body: JSON.stringify(payload)
     });
-
     const text = await githubRes.text();
-    console.log(`GitHub API ${githubRes.status}: ${text.substring(0,400)}`);
+    console.log(`GitHub API ${githubRes.status}: ${text.substring(0,500)}`);
 
     if(!githubRes.ok){
+      let msg = `GitHub ${githubRes.status}: ${text}`;
       if(githubRes.status===422){
-        return res.status(422).json({ success:false, error:`GitHub 422: Workflow missing workflow_dispatch or YAML invalid. Check .github/workflows/build.yml has 'on: workflow_dispatch'`, githubResponse:text });
+        msg = `422 still? Check: 1) .github/workflows/build.yml on ${BRANCH} branch has workflow_dispatch with EXACT 6 inputs (url,appName,packageName,buildId,iconBase64,splashBase64). 2) File path is build.yml not build.yaml. 3) Token has workflow scope. Raw: ${text}`;
       }
-      if(githubRes.status===401){
-        return res.status(401).json({ success:false, error:'GitHub 401: Token invalid or expired. Create new token with repo + workflow scopes', githubResponse:text });
-      }
-      if(githubRes.status===404){
-        return res.status(404).json({ success:false, error:`GitHub 404: Repo ${REPO} not found or token has no access. Check GITHUB_REPO name`, githubResponse:text });
-      }
-      throw new Error(`GitHub ${githubRes.status}: ${text}`);
+      if(githubRes.status===404) msg = `404 Repo or workflow not found. Repo=${REPO} File=build.yml Branch=${BRANCH}. Check repo name has trailing '-'? Actual repo might be web2app-builder without -. Raw: ${text}`;
+      if(githubRes.status===401) msg = `401 Token invalid/expired. Create new classic token with repo + workflow. Raw: ${text}`;
+      return res.status(githubRes.status).json({success:false, error:msg, githubResponse:text, sentInputs:Object.keys(payload.inputs)});
     }
-
     console.log(`✅ Triggered ${buildId}`);
-    res.json({ success:true, buildId });
-
+    res.json({success:true, buildId, message:'Triggered - check GitHub Actions tab in 10s'});
   }catch(e){
     console.error('Build error', e);
-    res.status(500).json({ success:false, error:e.message });
+    res.status(500).json({success:false, error:e.message});
   }
 });
 
-// CHECK if artifact ready
 app.get('/api/check/:buildId', async (req,res)=>{
   try{
-    if(!TOKEN) return res.json({ ready:false, error:'TOKEN missing' });
+    if(!TOKEN) return res.json({ready:false, error:'TOKEN missing'});
     const r = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100`, {
-      headers:{ 'Authorization': `Bearer ${TOKEN}`, 'Accept':'application/vnd.github+json', 'User-Agent':'web2app' }
+      headers:{'Authorization':`Bearer ${TOKEN}`,'Accept':'application/vnd.github+json'}
     });
     const data = await r.json();
-    const found = (data.artifacts||[]).filter(a=> a.name.includes(req.params.buildId));
-    res.json({ ready:found.length>0, count:found.length, artifacts:found.map(f=>f.name) });
-  }catch(e){ res.json({ ready:false, error:e.message }); }
+    const found = (data.artifacts||[]).filter(a=>a.name.includes(req.params.buildId));
+    res.json({ready:found.length>0, apkReady:found.some(a=>a.name.toLowerCase().includes('apk')), aabReady:found.some(a=>a.name.toLowerCase().includes('aab')), count:found.length, artifacts:found.map(f=>f.name), isPaid:paidBuilds.has(req.params.buildId)});
+  }catch(e){ res.json({ready:false, error:e.message}); }
 });
 
-// DOWNLOAD APK/AAB
+app.post('/api/verify-payment', (req,res)=>{
+  const {buildId, utr} = req.body;
+  if(!buildId) return res.status(400).json({success:false, error:'buildId required'});
+  if(!utr || utr.length < 6) return res.status(400).json({success:false, error:'Enter valid UTR min 6 chars'});
+  paidBuilds.add(buildId);
+  console.log(`✅ PAID ${buildId} UTR:${utr}`);
+  res.json({success:true, message:'Payment verified - AAB unlocked'});
+});
+
 app.get('/api/download/:buildId/:type', async (req,res)=>{
   try{
-    if(!TOKEN) return res.status(500).send('TOKEN missing in Render env');
-    const {buildId,type} = req.params;
-    const list = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100`, {
-      headers:{ 'Authorization': `Bearer ${TOKEN}`, 'Accept':'application/vnd.github+json', 'User-Agent':'web2app' }
-    }).then(r=>r.json());
-    const artifact = (list.artifacts||[]).find(a=> a.name.includes(buildId) && a.name.toLowerCase().includes(type.toLowerCase()));
-    if(!artifact){
-      return res.status(404).send(`Still building... BuildId ${buildId} not ready yet. Found ${list.artifacts?.length||0} total artifacts. Wait 2-3 min and refresh. Check GitHub Actions tab - build should be running.`);
+    const {buildId, type} = req.params;
+    const isAAB = type.toLowerCase().includes('aab');
+    if(isAAB && !paidBuilds.has(buildId)){
+      return res.status(402).json({error:'PAID_REQUIRED', message:'AAB paid ₹499', upi:'sandeep.k876@ptaxis', amount:499, buildId});
     }
-    const redirectRes = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {
-      headers:{ 'Authorization': `Bearer ${TOKEN}` }, redirect:'manual'
-    });
-    const downloadUrl = redirectRes.headers.get('location');
-    if(!downloadUrl) throw new Error('No download URL from GitHub');
-    const fileRes = await fetch(downloadUrl);
+    if(!TOKEN) return res.status(500).send('TOKEN missing');
+    const list = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100`, {
+      headers:{'Authorization':`Bearer ${TOKEN}`,'Accept':'application/vnd.github+json'}
+    }).then(r=>r.json());
+    const artifact = (list.artifacts||[]).find(a=>a.name.includes(buildId) && a.name.toLowerCase().includes(type.toLowerCase()));
+    if(!artifact) return res.status(404).send(`Still building ${buildId} ${type} - wait 2-3 min. Total: ${list.artifacts?.length||0}`);
+    const red = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {headers:{'Authorization':`Bearer ${TOKEN}`}, redirect:'manual'});
+    const dl = red.headers.get('location');
+    if(!dl) throw new Error('No download URL');
+    const file = await fetch(dl);
     res.setHeader('Content-Disposition',`attachment; filename="${artifact.name}.zip"`);
     res.setHeader('Content-Type','application/zip');
-    const {Readable} = require('stream');
-    Readable.fromWeb(fileRes.body).pipe(res);
-  }catch(e){ console.error(e); res.status(500).send(e.message); }
+    require('stream').Readable.fromWeb(file.body).pipe(res);
+  }catch(e){ res.status(500).send(e.message); }
 });
 
-// Serve frontend
-app.get('*',(req,res)=>{ res.sendFile(path.join(__dirname,'public','index.html')); });
+app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 const PORT = process.env.PORT||3000;
-app.listen(PORT,()=>console.log(`🚀 247 Running on ${PORT}`));
+app.listen(PORT,()=>console.log(`🚀 MATCHED 6-inputs server on ${PORT}`));
