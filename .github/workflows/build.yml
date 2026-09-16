@@ -4,19 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Website URL'
         required: true
         type: string
       appName:
-        description: 'App Name'
         required: true
         type: string
       packageName:
-        description: 'Package Name'
         required: true
         type: string
       buildId:
-        description: 'Build ID'
         required: true
         type: string
 
@@ -29,81 +25,63 @@ jobs:
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
           distribution: 'temurin'
+          java-version: '17'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
         with:
-          gradle-version: '8.5'
+          node-version: '20'
 
-      - name: Create WebView Project
+      - name: Install Capacitor
+        run: npm install -g @capacitor/cli @capacitor/core
+
+      - name: Create App
         run: |
-          # Clean old
-          rm -rf app build gradle settings.gradle build.gradle gradlew
-          
-          PKG_PATH=$(echo "${{ inputs.packageName }}" | tr '.' '/')
-          mkdir -p app/src/main/java/$PKG_PATH
-          
-          cat > settings.gradle <<'EOF'
-          include ':app'
-          EOF
-
-          cat > build.gradle <<'EOF'
-          buildscript {
-              repositories { google(); mavenCentral() }
-              dependencies { classpath 'com.android.tools.build:gradle:8.2.0' }
+          npm init -y
+          npm install @capacitor/core @capacitor/android
+          npx cap init "${{ inputs.appName }}" "${{ inputs.packageName }}" --web-dir=www
+          mkdir -p www
+          cat > www/index.html << 'HTML'
+          <!DOCTYPE html>
+          <html><head><meta name="viewport" content="width=device-width"><style>body{margin:0}iframe{width:100vw;height:100vh;border:0}</style></head>
+          <body><iframe src="${{ inputs.url }}"></iframe></body></html>
+          HTML
+          cat > capacitor.config.json << JSON
+          {
+            "appId": "${{ inputs.packageName }}",
+            "appName": "${{ inputs.appName }}",
+            "webDir": "www",
+            "server": { "androidScheme": "https" }
           }
-          allprojects { repositories { google(); mavenCentral() } }
-          EOF
+          JSON
+          npx cap add android
+          # Update app name
+          sed -i "s/<string name=\"app_name\">.*<\/string>/<string name=\"app_name\">${{ inputs.appName }}<\/string>/g" android/app/src/main/res/values/strings.xml || true
+          # Enable internet
+          grep -q "INTERNET" android/app/src/main/AndroidManifest.xml || sed -i '/<application/a \    <uses-permission android:name="android.permission.INTERNET" />' android/app/src/main/AndroidManifest.xml || true
 
-          cat > app/build.gradle <<EOF
-          plugins { id 'com.android.application' }
-          android {
-              namespace '${{ inputs.packageName }}'
-              compileSdk 34
-              defaultConfig {
-                  applicationId "${{ inputs.packageName }}"
-                  minSdk 21
-                  targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
-              }
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                  }
-              }
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-          }
-          dependencies {
-              implementation 'androidx.appcompat:appcompat:1.6.1'
-          }
-          EOF
+      - name: Build APK (Debug)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
 
-          cat > app/src/main/AndroidManifest.xml <<EOF
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <application android:label="${{ inputs.appName }}" android:theme="@android:style/Theme.NoTitleBar" android:usesCleartextTraffic="true">
-                  <activity android:name=".MainActivity" android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
+      - name: Build AAB (Release)
+        run: |
+          cd android
+          ./gradlew bundleDebug --stacktrace
 
-          cat > app/src/main/java/$PKG_PATH/MainActivity.java <<EOF
-          package ${{ inputs.packageName }};
-          import android.app.Activity;
-          import android.os.Bundle;
-          import android.webkit.WebView;
-          import android.webkit.WebViewClient;
-          public class MainActivity extends Activity {
-              Web
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.appName }}-APK-${{ inputs.buildId }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.appName }}-AAB-${{ inputs.buildId }}
+          path: android/app/build/outputs/bundle/debug/app-debug.aab
+          if-no-files-found: error
