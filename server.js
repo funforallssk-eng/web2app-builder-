@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');
 const path = require('path');
 const app = express();
 
@@ -33,8 +32,7 @@ app.post('/api/build', async (req, res) => {
 
 app.get('/api/check/:buildId', async (req, res) => {
   try {
-    const { buildId } = req.params;
-    const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/tags/build-${buildId}`, {
+    const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/tags/build-${req.params.buildId}`, {
       headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
     });
     if (r.ok) {
@@ -45,8 +43,12 @@ app.get('/api/check/:buildId', async (req, res) => {
     } else {
       res.json({ ready: false });
     }
-  } catch (e) { res.json({ ready: false }); }
+  } catch { res.json({ ready: false }); }
 });
 
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// IMPORTANT - Serve frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.listen(process.env.PORT || 3000, () => console.log('Running'));
