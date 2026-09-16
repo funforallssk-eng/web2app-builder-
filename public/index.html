@@ -1,80 +1,59 @@
-<!-- Your existing form -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web2App - Website to App in 3 Mins</title>
+<style>
+*{box-sizing:border-box} body{font-family:system-ui;max-width:700px;margin:40px auto;padding:20px;background:#fafafa}
+.card{background:#fff;padding:30px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
+input{width:100%;padding:14px;margin:10px 0;border:2px solid #e5e7eb;border-radius:10px;font-size:16px}
+button{width:100%;padding:16px;background:#111;color:#fff;border:0;border-radius:10px;font-size:18px;font-weight:600;cursor:pointer;margin-top:10px}
+button:disabled{background:#999}
+#status{margin-top:20px;padding:15px;background:#f3f4f6;border-radius:10px}
+.progress{background:#e5e7eb;height:12px;border-radius:10px;overflow:hidden;margin:12px 0}
+.progress-bar{height:100%;background:#10b981;transition:width 1s}
+.btn{display:inline-block;padding:16px 28px;margin:8px;border-radius:10px;color:#fff;text-decoration:none;font-weight:600}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🚀 Web2App Builder</h1>
+<p>Convert any website to Android APK + AAB in 3 minutes</p>
 <form id="buildForm">
-  <input id="url" placeholder="https://store.cheapodeal.com.au" required>
-  <input id="appName" placeholder="CheapoDeal" required>
-  <input id="packageName" placeholder="com.cheapodeal.app" required>
-  <button type="submit" id="buildBtn">Build APK + AAB</button>
+<input id="url" placeholder="https://store.cheapodeal.com.au" value="https://store.cheapodeal.com.au" required>
+<input id="appName" placeholder="App Name" value="CheapoDeal" required>
+<input id="packageName" placeholder="com.example.app" value="com.cheapodeal.app" required>
+<button id="buildBtn">Build APK + AAB</button>
 </form>
-
-<div id="status"></div>
-<div id="downloadArea" style="display:none; margin-top:20px;">
-  <h3>✅ Build Ready!</h3>
-  <a id="apkBtn" href="#" class="btn" style="background:green;color:white;padding:15px 30px;margin:10px;display:inline-block;text-decoration:none;border-radius:8px;">📱 Download APK</a>
-  <a id="aabBtn" href="#" class="btn" style="background:blue;color:white;padding:15px 30px;margin:10px;display:inline-block;text-decoration:none;border-radius:8px;">📦 Download AAB for Play Store</a>
+<div id="status" style="display:none"></div>
+<div id="downloadArea" style="display:none;text-align:center;margin-top:20px">
+<h2>✅ Build Ready!</h2>
+<a id="apkBtn" href="#" class="btn" style="background:#10b981">📱 Download APK</a>
+<a id="aabBtn" href="#" class="btn" style="background:#3b82f6">📦 Download AAB (Play Store)</a>
+<p style="margin-top:15px"><small>Install APK directly on phone. Upload AAB to Google Play Console.</small></p>
 </div>
-
+</div>
 <script>
-document.getElementById('buildForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const btn = document.getElementById('buildBtn');
-  const status = document.getElementById('status');
-  
-  btn.disabled = true;
-  btn.innerText = "Building...";
-  status.innerHTML = "⏳ Build started... This takes 3-4 minutes. Please wait...<br><div style='margin:10px 0; background:#eee; border-radius:10px; height:20px; overflow:hidden;'><div id='progress' style='width:10%; background:green; height:100%; transition:width 2s;'></div></div><small id='timer'>0s elapsed</small>";
-
-  const payload = {
-    url: document.getElementById('url').value,
-    appName: document.getElementById('appName').value,
-    packageName: document.getElementById('packageName').value
-  };
-
-  try {
-    // 1. Trigger build
-    const res = await fetch('/api/build', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    
-    if (!data.success) throw new Error(data.error);
-    
-    const buildId = data.buildId;
-    let seconds = 0;
-    
-    // Timer
-    const timerInt = setInterval(() => {
-      seconds += 5;
-      document.getElementById('timer').innerText = `${seconds}s elapsed (approx 180s total)`;
-      document.getElementById('progress').style.width = Math.min(90, 10 + seconds) + '%';
-    }, 5000);
-
-    // 2. Poll every 15 sec if ready
-    const checkInterval = setInterval(async () => {
-      const check = await fetch(`/api/check/${buildId}`).then(r => r.json());
-      
-      if (check.ready) {
-        clearInterval(checkInterval);
-        clearInterval(timerInt);
-        
-        status.innerHTML = "✅ Build Complete!";
-        document.getElementById('progress').style.width = '100%';
-        
-        // Show direct download buttons
-        document.getElementById('downloadArea').style.display = 'block';
-        document.getElementById('apkBtn').href = check.apkUrl;
-        document.getElementById('aabBtn').href = check.aabUrl;
-        
-        btn.disabled = false;
-        btn.innerText = "Build Another App";
-      }
-    }, 15000);
-
-  } catch (err) {
-    status.innerHTML = "❌ Error: " + err.message;
-    btn.disabled = false;
-    btn.innerText = "Build APK + AAB";
-  }
+const form=document.getElementById('buildForm'), btn=document.getElementById('buildBtn'), status=document.getElementById('status'), dl=document.getElementById('downloadArea');
+form.addEventListener('submit', async(e)=>{
+e.preventDefault(); btn.disabled=true; btn.innerText='⏳ Building...'; status.style.display='block'; dl.style.display='none';
+status.innerHTML='⏳ Build started... This takes 3-4 minutes. Please wait...<div class="progress"><div id="progress" class="progress-bar" style="width:10%"></div></div><small id="timer">0s elapsed</small>';
+let sec=0; const timer=setInterval(()=>{sec+=5; document.getElementById('timer').innerText=sec+'s elapsed (avg 180s)'; document.getElementById('progress').style.width=Math.min(90,10+sec/2)+'%';},5000);
+try{
+const payload={url:document.getElementById('url').value, appName:document.getElementById('appName').value, packageName:document.getElementById('packageName').value};
+const res=await fetch('/api/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
+if(!res.success) throw new Error(res.error);
+const checkInt=setInterval(async()=>{
+const check=await fetch('/api/check/'+res.buildId).then(r=>r.json());
+if(check.ready){
+clearInterval(checkInt); clearInterval(timer);
+status.innerHTML='🎉 Build Complete!'; document.getElementById('progress').style.width='100%';
+dl.style.display='block'; document.getElementById('apkBtn').href=check.apkUrl; document.getElementById('aabBtn').href=check.aabUrl;
+btn.disabled=false; btn.innerText='Build Another App';
+}
+},15000);
+}catch(err){status.innerHTML='❌ '+err.message; btn.disabled=false; btn.innerText='Build APK + AAB'; clearInterval(timer);}
 });
 </script>
+</body>
+</html>
