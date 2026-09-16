@@ -1,4 +1,4 @@
-name: Build APK AAB - FIXED workflow_dispatch
+name: Build APK AAB Fixed
 
 on:
   workflow_dispatch:
@@ -72,7 +72,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK - FIXED NO TOOLS
+      - name: Setup Android SDK
         run: |
           mkdir -p $HOME/android-sdk/cmdline-tools
           cd $HOME/android-sdk/cmdline-tools
@@ -89,81 +89,164 @@ jobs:
       - name: Create Project Structure
         run: |
           mkdir -p app/src/main/java/com/web2app
-          mkdir -p app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi
-          mkdir -p app/src/main/res/drawable app/src/main/res/values
-          echo "Structure created"
+          mkdir -p app/src/main/res/mipmap-hdpi
+          mkdir -p app/src/main/res/mipmap-mdpi
+          mkdir -p app/src/main/res/mipmap-xhdpi
+          mkdir -p app/src/main/res/mipmap-xxhdpi
+          mkdir -p app/src/main/res/mipmap-xxxhdpi
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/values
 
-      - name: Process Icon & Splash
+      - name: Process Icon
+        env:
+          ICON_B64: ${{ inputs.iconBase64 }}
         run: |
           pip install Pillow -q
           python3 << 'PY'
-          import base64, io
+          import base64, io, os
           from PIL import Image
-          def save_icon(b64):
-              try:
-                  if ',' in b64: b64 = b64.split(',')[1]
-                  img = Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA') if len(b64)>100 else Image.new('RGBA',(512,512),(15,23,42,255))
-                  for folder,size in {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}.items():
-                      img.resize((size,size), Image.LANCZOS).save(f"app/src/main/res/{folder}/ic_launcher.png")
-                      img.resize((size,size), Image.LANCZOS).save(f"app/src/main/res/{folder}/ic_launcher_round.png")
-                  img.thumbnail((400,400))
-                  img.save("app/src/main/res/drawable/splash_icon.png")
-                  print("Icon done")
-              except Exception as e:
-                  print(f"Icon failed {e}")
-          def save_splash(b64):
-              try:
-                  if ',' in b64: b64 = b64.split(',')[1]
+          b64 = os.environ.get('ICON_B64','')
+          try:
+              if ',' in b64:
+                  b64 = b64.split(',')[1]
+              if len(b64) > 100:
                   img = Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
-                  img.thumbnail((800,800))
-                  img.save("app/src/main/res/drawable/splash_center.png")
-                  print("Splash done")
-              except: pass
-          save_icon("""${{ inputs.iconBase64 }}""")
-          save_splash("""${{ inputs.splashBase64 }}""")
+              else:
+                  img = Image.new('RGBA',(512,512),(15,23,42,255))
+              for folder,size in {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}.items():
+                  img.resize((size,size), Image.LANCZOS).save(f"app/src/main/res/{folder}/ic_launcher.png")
+                  img.resize((size,size), Image.LANCZOS).save(f"app/src/main/res/{folder}/ic_launcher_round.png")
+              img.thumbnail((400,400))
+              img.save("app/src/main/res/drawable/splash_icon.png")
+              print("Icon done")
+          except Exception as e:
+              print(f"Icon failed {e}")
+              img = Image.new('RGBA',(512,512),(15,23,42,255))
+              for folder in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
+                  img.save(f"app/src/main/res/{folder}/ic_launcher.png")
+                  img.save(f"app/src/main/res/{folder}/ic_launcher_round.png")
+              img.save("app/src/main/res/drawable/splash_icon.png")
+          PY
+
+      - name: Process Splash
+        env:
+          SPLASH_B64: ${{ inputs.splashBase64 }}
+        run: |
+          python3 << 'PY'
+          import base64, io, os
+          from PIL import Image
+          b64 = os.environ.get('SPLASH_B64','')
+          if len(b64) < 100:
+              print("No splash")
+              exit(0)
+          try:
+              if ',' in b64:
+                  b64 = b64.split(',')[1]
+              img = Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
+              img.thumbnail((800,800))
+              img.save("app/src/main/res/drawable/splash_center.png")
+              print("Splash done")
+          except Exception as e:
+              print(f"Splash failed {e}")
           PY
 
       - name: Generate Android Files
         run: |
           cat > app/src/main/res/values/colors.xml << EOF
-          <resources><color name="colorPrimary">${{ inputs.statusBarColor }}</color><color name="splashBackground">${{ inputs.splashBgColor }}</color></resources>
+          <resources>
+            <color name="colorPrimary">${{ inputs.statusBarColor }}</color>
+            <color name="splashBackground">${{ inputs.splashBgColor }}</color>
+          </resources>
           EOF
           cat > app/src/main/res/values/themes.xml << EOF
-          <resources><style name="SplashTheme" parent="Theme.SplashScreen"><item name="windowSplashScreenBackground">@color/splashBackground</item><item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item><item name="postSplashScreenTheme">@style/AppTheme</item></style><style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar"></style></resources>
+          <resources>
+            <style name="SplashTheme" parent="Theme.SplashScreen">
+              <item name="windowSplashScreenBackground">@color/splashBackground</item>
+              <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+              <item name="postSplashScreenTheme">@style/AppTheme</item>
+            </style>
+            <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar"></style>
+          </resources>
           EOF
           cat > app/src/main/AndroidManifest.xml << EOF
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="${{ inputs.packageName }}"><uses-permission android:name="android.permission.INTERNET"/><application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="${{ inputs.packageName }}">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme">
+              <activity android:name=".MainActivity" android:exported="true">
+                <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+              </activity>
+            </application>
+          </manifest>
           EOF
+
+      - name: Generate MainActivity
+        run: |
           cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
           package com.web2app;
-          import android.os.Bundle; import android.webkit.WebSettings; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity; import androidx.core.splashscreen.SplashScreen; import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import androidx.appcompat.app.AppCompatActivity;
+          import androidx.core.splashscreen.SplashScreen;
+          import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
           public class MainActivity extends AppCompatActivity {
-              private WebView webView; private SwipeRefreshLayout swipeRefresh;
-              @Override protected void onCreate(Bundle savedInstanceState) {
-                  SplashScreen.installSplashScreen(this); super.onCreate(savedInstanceState);
-                  boolean pull = !"false".equals("PULL_FLAG");
-                  if(pull){ swipeRefresh=new SwipeRefreshLayout(this); webView=new WebView(this); swipeRefresh.addView(webView); setContentView(swipeRefresh); swipeRefresh.setOnRefreshListener(()->webView.reload());}
-                  else{ webView=new WebView(this); setContentView(webView);}
-                  WebSettings s=webView.getSettings(); s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true);
-                  webView.setWebViewClient(new WebViewClient(){ @Override public void onPageFinished(WebView v,String url){ super.onPageFinished(v,url); if(swipeRefresh!=null) swipeRefresh.setRefreshing(false); }});
-                  webView.loadUrl("URL_PLACEHOLDER");
+              private WebView webView;
+              private SwipeRefreshLayout swipeRefresh;
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  SplashScreen.installSplashScreen(this);
+                  super.onCreate(savedInstanceState);
+                  boolean pull = true;
+                  if (pull) {
+                      swipeRefresh = new SwipeRefreshLayout(this);
+                      webView = new WebView(this);
+                      swipeRefresh.addView(webView);
+                      setContentView(swipeRefresh);
+                      swipeRefresh.setOnRefreshListener(() -> webView.reload());
+                  } else {
+                      webView = new WebView(this);
+                      setContentView(webView);
+                  }
+                  WebSettings s = webView.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  webView.setWebViewClient(new WebViewClient(){
+                      @Override public void onPageFinished(WebView v,String url){
+                          super.onPageFinished(v,url);
+                          if(swipeRefresh!=null) swipeRefresh.setRefreshing(false);
+                      }
+                  });
+                  webView.loadUrl("https://example.com");
               }
               @Override public void onBackPressed(){ if(webView.canGoBack()) webView.goBack(); else super.onBackPressed(); }
           }
           JAVA
-          sed -i "s|URL_PLACEHOLDER|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java
-          sed -i "s|PULL_FLAG|${{ inputs.pullToRefresh }}|g" app/src/main/java/com/web2app/MainActivity.java
+          sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java
+          if [ "${{ inputs.pullToRefresh }}" = "false" ]; then
+            sed -i "s|boolean pull = true|boolean pull = false|g" app/src/main/java/com/web2app/MainActivity.java
+          fi
           cat > app/build.gradle << 'GRADLE'
           plugins { id 'com.android.application' }
-          android { namespace 'REPLACE_PKG'; compileSdk 34; defaultConfig { applicationId "REPLACE_PKG"; minSdk 21; targetSdk 34; versionCode 1; versionName "1.0" } buildTypes { release { minifyEnabled false } } }
-          dependencies { implementation 'androidx.appcompat:appcompat:1.6.1'; implementation 'androidx.core:core-splashscreen:1.0.1'; implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'; implementation 'com.google.android.material:material:1.11.0' }
+          android {
+              namespace 'com.example.app'
+              compileSdk 34
+              defaultConfig { applicationId "com.example.app"; minSdk 21; targetSdk 34; versionCode 1; versionName "1.0" }
+              buildTypes { release { minifyEnabled false } }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'androidx.core:core-splashscreen:1.0.1'
+              implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+              implementation 'com.google.android.material:material:1.11.0'
+          }
           GRADLE
-          sed -i "s|REPLACE_PKG|${{ inputs.packageName }}|g" app/build.gradle
+          sed -i "s|com.example.app|${{ inputs.packageName }}|g" app/build.gradle
           echo "include ':app'" > settings.gradle
           echo "buildscript{repositories{google();mavenCentral()} dependencies{classpath 'com.android.tools.build:gradle:8.2.0'}} allprojects{repositories{google();mavenCentral()}}" > build.gradle
           echo "org.gradle.jvmargs=-Xmx2048m" > gradle.properties
 
-      - name: Build
+      - name: Build APK and AAB
         run: |
           gradle wrapper --gradle-version 8.5 || true
           chmod +x gradlew || true
@@ -172,10 +255,15 @@ jobs:
             echo "APK ${{ inputs.buildId }}" > app/build/outputs/apk/release/app-release.apk
             echo "AAB ${{ inputs.buildId }}" > app/build/outputs/bundle/release/app-release.aab
           }
-          ls -lh app/build/outputs/apk/release/ || true
-          ls -lh app/build/outputs/bundle/release/ || true
 
-      - uses: actions/upload-artifact@v4
-        with: { name: ${{ inputs.buildId }}-apk-FREE, path: app/build/outputs/apk/release/*.apk }
-      - uses: actions/upload-artifact@v4
-        with: { name: ${{ inputs.buildId }}-aab-PAID-499, path: app/build/outputs/bundle/release/*.aab }
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-free-${{ inputs.buildId }}
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: aab-paid-${{ inputs.buildId }}
+          path: app/build/outputs/bundle/release/*.aab
