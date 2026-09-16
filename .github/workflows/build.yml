@@ -1,4 +1,4 @@
-name: Build APK AAB
+name: Build APK AAB Simple
 
 on:
   workflow_dispatch:
@@ -6,58 +6,32 @@ on:
       url:
         description: Website URL
         required: true
+        default: https://example.com
         type: string
       appName:
         description: App Name
         required: true
+        default: My App
         type: string
       packageName:
         description: Package ID
         required: true
+        default: com.example.app
         type: string
       buildId:
         description: Build ID
         required: true
+        default: '123'
         type: string
       iconBase64:
-        description: Icon base64
+        description: Icon
         required: false
         default: ''
         type: string
       splashBase64:
-        description: Splash base64
+        description: Splash
         required: false
         default: ''
-        type: string
-      splashBgColor:
-        description: Splash BG
-        required: false
-        default: '#0f172a'
-        type: string
-      iconBgColor:
-        description: Icon BG
-        required: false
-        default: '#0f172a'
-        type: string
-      pullToRefresh:
-        description: Pull refresh
-        required: false
-        default: 'true'
-        type: string
-      splashDuration:
-        description: Splash duration
-        required: false
-        default: '2000'
-        type: string
-      statusBarColor:
-        description: Status bar
-        required: false
-        default: '#0f172a'
-        type: string
-      orientation:
-        description: Orientation
-        required: false
-        default: 'portrait'
         type: string
 
 jobs:
@@ -71,30 +45,34 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup SDK
+      - name: Setup Android SDK - FIXED PATH
         run: |
+          set -e
           mkdir -p $HOME/sdk/cmdline-tools
           cd $HOME/sdk/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O t.zip
-          unzip -q t.zip
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O tools.zip
+          unzip -q tools.zip
           mv cmdline-tools latest
-          echo "$HOME/sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$HOME/sdk/platform-tools" >> $GITHUB_PATH
+          export ANDROID_HOME=$HOME/sdk
+          export ANDROID_SDK_ROOT=$HOME/sdk
+          export PATH=$HOME/sdk/cmdline-tools/latest/bin:$HOME/sdk/platform-tools:$PATH
           echo "ANDROID_HOME=$HOME/sdk" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$HOME/sdk" >> $GITHUB_ENV
-          yes | sdkmanager --licenses || true
-          sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+          echo "$HOME/sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$HOME/sdk/platform-tools" >> $GITHUB_PATH
+          echo "Checking sdkmanager at $HOME/sdk/cmdline-tools/latest/bin/sdkmanager"
+          ls -lh $HOME/sdk/cmdline-tools/latest/bin/
+          $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --version
+          yes | $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+          $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+          echo "SDK setup done"
 
-      - name: Create dirs
+      - name: Create project
         run: |
           mkdir -p app/src/main/java/com/web2app
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          mkdir -p app/src/main/res/mipmap-xxxhdpi
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi
+          mkdir -p app/src/main/res/drawable app/src/main/res/values
+          echo "dirs created"
 
       - name: Make icon
         env:
@@ -104,50 +82,28 @@ jobs:
           python3 << 'PY'
           import base64, io, os
           from PIL import Image
-          b64 = os.environ.get('ICON_B64','')
+          b64=os.environ.get('ICON_B64','')
           try:
-            if ',' in b64: b64 = b64.split(',')[1]
-            if len(b64) > 100:
-              img = Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
+            if ',' in b64: b64=b64.split(',')[1]
+            if len(b64)>100:
+              img=Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
             else:
-              img = Image.new('RGBA',(512,512),(15,23,42,255))
+              img=Image.new('RGBA',(512,512),(15,23,42,255))
             for f,s in {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}.items():
               img.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher.png")
               img.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher_round.png")
             img.thumbnail((400,400))
             img.save("app/src/main/res/drawable/splash_icon.png")
-            print("icon ok")
           except Exception as e:
             print(e)
-            img = Image.new('RGBA',(512,512),(15,23,42,255))
+            img=Image.new('RGBA',(512,512),(15,23,42,255))
             for f in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
               img.save(f"app/src/main/res/{f}/ic_launcher.png")
               img.save(f"app/src/main/res/{f}/ic_launcher_round.png")
             img.save("app/src/main/res/drawable/splash_icon.png")
           PY
 
-      - name: Make splash
-        env:
-          SPLASH_B64: ${{ inputs.splashBase64 }}
-        run: |
-          python3 << 'PY'
-          import base64, io, os
-          from PIL import Image
-          b64 = os.environ.get('SPLASH_B64','')
-          if len(b64) < 100:
-            print("no splash")
-            exit(0)
-          try:
-            if ',' in b64: b64 = b64.split(',')[1]
-            img = Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
-            img.thumbnail((800,800))
-            img.save("app/src/main/res/drawable/splash_center.png")
-            print("splash ok")
-          except Exception as e:
-            print(e)
-          PY
-
-      - name: Make android files
+      - name: Make files
         run: |
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <resources><color name="colorPrimary">#0f172a</color><color name="splashBackground">#0f172a</color></resources>
@@ -158,7 +114,7 @@ jobs:
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app"><uses-permission android:name="android.permission.INTERNET"/><application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           EOF
-          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml
+          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml || true
           cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
           package com.web2app;
           import android.os.Bundle; import android.webkit.WebSettings; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity; import androidx.core.splashscreen.SplashScreen; import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -166,33 +122,30 @@ jobs:
             private WebView webView; private SwipeRefreshLayout swipeRefresh;
             @Override protected void onCreate(Bundle savedInstanceState) {
               SplashScreen.installSplashScreen(this); super.onCreate(savedInstanceState);
-              boolean pull = true;
-              if(pull){ swipeRefresh=new SwipeRefreshLayout(this); webView=new WebView(this); swipeRefresh.addView(webView); setContentView(swipeRefresh); swipeRefresh.setOnRefreshListener(()->webView.reload()); } else { webView=new WebView(this); setContentView(webView); }
+              swipeRefresh=new SwipeRefreshLayout(this); webView=new WebView(this); swipeRefresh.addView(webView); setContentView(swipeRefresh); swipeRefresh.setOnRefreshListener(()->webView.reload());
               WebSettings s=webView.getSettings(); s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true);
-              webView.setWebViewClient(new WebViewClient(){ @Override public void onPageFinished(WebView v,String u){ super.onPageFinished(v,u); if(swipeRefresh!=null) swipeRefresh.setRefreshing(false); } });
+              webView.setWebViewClient(new WebViewClient(){ @Override public void onPageFinished(WebView v,String u){ super.onPageFinished(v,u); swipeRefresh.setRefreshing(false); } });
               webView.loadUrl("https://example.com");
             }
             @Override public void onBackPressed(){ if(webView.canGoBack()) webView.goBack(); else super.onBackPressed(); }
           }
           JAVA
-          sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java
+          sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java || true
           cat > app/build.gradle << 'GRADLE'
           plugins { id 'com.android.application' }
           android { namespace 'com.example.app'; compileSdk 34; defaultConfig { applicationId "com.example.app"; minSdk 21; targetSdk 34; versionCode 1; versionName "1.0" } buildTypes { release { minifyEnabled false } } }
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1'; implementation 'androidx.core:core-splashscreen:1.0.1'; implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'; implementation 'com.google.android.material:material:1.11.0' }
           GRADLE
-          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle
+          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle || true
           echo "include ':app'" > settings.gradle
           echo "buildscript{repositories{google();mavenCentral()} dependencies{classpath 'com.android.tools.build:gradle:8.2.0'}} allprojects{repositories{google();mavenCentral()}}" > build.gradle
           echo "org.gradle.jvmargs=-Xmx2048m" > gradle.properties
 
-      - name: Build
+      - name: Build APK AAB
         run: |
           gradle wrapper --gradle-version 8.5 || true
           chmod +x gradlew || true
           ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
-          mkdir -p app/build/outputs/apk/release
-          mkdir -p app/build/outputs/bundle/release
           ls -lh app/build/outputs/apk/release/ || true
           ls -lh app/build/outputs/bundle/release/ || true
 
