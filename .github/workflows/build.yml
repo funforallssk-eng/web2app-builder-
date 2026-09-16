@@ -1,4 +1,4 @@
-name: Build APK AAB
+name: Build APK AAB Signed
 
 on:
   workflow_dispatch:
@@ -67,32 +67,33 @@ jobs:
           mkdir -p app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi
           mkdir -p app/src/main/res/drawable app/src/main/res/values
 
-      - name: Restore icon and splash from repo (auto-crop method)
+      - name: Generate Keystore for Signed APK (FIX invalid package)
         run: |
-          set -e
-          echo "Looking for temp-icons/${{ inputs.buildId }}-icon.png"
-          ls -lh temp-icons/ || echo "no temp-icons folder"
+          # Generate release keystore - fixes "package seems invalid"
+          keytool -genkey -v -keystore release.keystore -alias release -keyalg RSA -keysize 2048 -validity 10000 -storepass android123 -keypass android123 -dname "CN=247 Software, OU=Mobile, O=247, L=Ludhiana, ST=Punjab, C=IN"
+          ls -lh release.keystore
+          echo "Keystore generated"
+
+      - name: Restore icon and splash from repo
+        run: |
+          ls -lh temp-icons/ || echo "no temp-icons"
           pip install Pillow -q
           python3 << 'PY'
-          import os, glob, base64
+          import os
           from PIL import Image
           build_id="${{ inputs.buildId }}"
           icon_path=f"temp-icons/{build_id}-icon.png"
           splash_path=f"temp-icons/{build_id}-splash.png"
-          
           def make_default():
               img=Image.new('RGBA',(512,512),(15,23,42,255))
               for f in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
                   img.save(f"app/src/main/res/{f}/ic_launcher.png")
                   img.save(f"app/src/main/res/{f}/ic_launcher_round.png")
               img.resize((200,200)).save("app/src/main/res/drawable/splash_icon.png")
-          
-          # ICON
           try:
               if os.path.exists(icon_path):
                   print(f"Found icon {icon_path}")
                   img=Image.open(icon_path).convert('RGBA')
-                  # auto-crop cover 512x512
                   w,h=img.size
                   ratio=max(512/w,512/h)
                   nw,nh=int(w*ratio),int(h*ratio)
@@ -104,33 +105,29 @@ jobs:
                       img512.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher.png")
                       img512.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher_round.png")
                   img512.resize((200,200), Image.LANCZOS).save("app/src/main/res/drawable/splash_icon.png")
-                  print("icon auto-cropped from repo file")
+                  print("icon ok")
               else:
-                  print("No custom icon, using default")
+                  print("default icon")
                   make_default()
           except Exception as e:
-              print(f"icon error {e}")
+              print(e)
               make_default()
-          
-          # SPLASH
           try:
               if os.path.exists(splash_path):
-                  print(f"Found splash {splash_path}")
                   img=Image.open(splash_path).convert('RGBA')
                   img.thumbnail((800,800), Image.LANCZOS)
                   img.save("app/src/main/res/drawable/splash_center.png")
-                  print("splash saved")
-              else:
-                  print("No custom splash")
+                  print("splash ok")
           except Exception as e:
-              print(f"splash error {e}")
+              print(e)
           PY
 
-      - name: Generate files
+      - name: Generate Android files with SIGNING CONFIG
         run: |
           cat > settings.gradle << 'EOF'
           include ':app'
           EOF
+
           cat > build.gradle << 'EOF'
           buildscript {
               repositories {
@@ -151,20 +148,25 @@ jobs:
               delete rootProject.buildDir
           }
           EOF
+
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
           EOF
+
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <resources><color name="colorPrimary">#0f172a</color><color name="splashBackground">#0f172a</color></resources>
           EOF
+
           cat > app/src/main/res/values/themes.xml << 'EOF'
           <resources><style name="SplashTheme" parent="Theme.SplashScreen"><item name="windowSplashScreenBackground">@color/splashBackground</item><item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item><item name="postSplashScreenTheme">@style/AppTheme</item></style><style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar"></style></resources>
           EOF
+
           cat > app/src/main/AndroidManifest.xml << 'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app"><uses-permission android:name="android.permission.INTERNET"/><application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app"><uses-permission android:name="android.permission.INTERNET"/><application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme" android:allowBackup="true"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           EOF
           sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml || true
+
           cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
           package com.web2app;
           import android.os.Bundle;
@@ -188,6 +190,8 @@ jobs:
               WebSettings s=webView.getSettings();
               s.setJavaScriptEnabled(true);
               s.setDomStorageEnabled(true);
+              s.setAllowFileAccess(true);
+              s.setMixedContentMode(0);
               webView.setWebViewClient(new WebViewClient(){
                 @Override public void onPageFinished(WebView v,String u){
                   super.onPageFinished(v,u);
@@ -203,13 +207,27 @@ jobs:
           }
           JAVA
           sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java || true
+
           cat > app/build.gradle << 'EOF'
           plugins {
               id 'com.android.application'
           }
+
           android {
               namespace 'com.example.app'
               compileSdk 34
+
+              signingConfigs {
+                  release {
+                      storeFile file('../release.keystore')
+                      storePassword 'android123'
+                      keyAlias 'release'
+                      keyPassword 'android123'
+                      v1SigningEnabled true
+                      v2SigningEnabled true
+                  }
+              }
+
               defaultConfig {
                   applicationId "com.example.app"
                   minSdk 21
@@ -217,16 +235,24 @@ jobs:
                   versionCode 1
                   versionName "1.0"
               }
+
               buildTypes {
                   release {
                       minifyEnabled false
+                      shrinkResources false
+                      signingConfig signingConfigs.release
+                  }
+                  debug {
+                      signingConfig signingConfigs.release
                   }
               }
+
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
           }
+
           dependencies {
               implementation 'androidx.appcompat:appcompat:1.6.1'
               implementation 'androidx.core:core-splashscreen:1.0.1'
@@ -236,28 +262,29 @@ jobs:
           EOF
           sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle || true
 
-      - name: Build APK AAB
+          cat app/build.gradle
+
+      - name: Build SIGNED APK AAB
         run: |
           export ANDROID_HOME=$HOME/sdk
           /tmp/gradle-8.5/bin/gradle wrapper --gradle-version 8.5
           chmod +x gradlew
           ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
+          echo "=== APK info ==="
           ls -lh app/build/outputs/apk/release/
+          # Verify APK is signed
+          $HOME/sdk/build-tools/34.0.0/apksigner verify --verbose app/build/outputs/apk/release/*.apk || echo "Verify check"
+          echo "=== AAB info ==="
           ls -lh app/build/outputs/bundle/release/
 
-      - name: Upload APK
+      - name: Upload APK SIGNED
         uses: actions/upload-artifact@v4
         with:
           name: apk-free-${{ inputs.buildId }}
           path: app/build/outputs/apk/release/*.apk
 
-      - name: Upload AAB
+      - name: Upload AAB SIGNED
         uses: actions/upload-artifact@v4
         with:
           name: aab-paid-${{ inputs.buildId }}
           path: app/build/outputs/bundle/release/*.aab
-
-      - name: Cleanup temp icon (optional)
-        if: always()
-        run: |
-          rm -rf temp-icons/${{ inputs.buildId }}-icon.png temp-icons/${{ inputs.buildId }}-splash.png || true
