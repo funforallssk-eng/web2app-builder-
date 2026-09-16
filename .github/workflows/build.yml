@@ -1,4 +1,4 @@
-name: Build APK AAB
+name: Build APK AAB Fixed
 
 on:
   workflow_dispatch:
@@ -35,12 +35,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup SDK
+      - name: Setup Android SDK
         run: |
           set -e
           mkdir -p $HOME/sdk/cmdline-tools
@@ -52,11 +53,20 @@ jobs:
           export ANDROID_SDK_ROOT=$HOME/sdk
           export PATH=$HOME/sdk/cmdline-tools/latest/bin:$HOME/sdk/platform-tools:$PATH
           echo "ANDROID_HOME=$HOME/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$HOME/sdk" >> $GITHUB_ENV
           echo "$HOME/sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$HOME/sdk/platform-tools" >> $GITHUB_PATH
           $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --version
           yes | $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
           $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+
+      - name: Setup Gradle 8.5 (Fix 9.7.1 incompatibility)
+        run: |
+          cd /tmp
+          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          unzip -q gradle-8.5-bin.zip
+          echo "/tmp/gradle-8.5/bin" >> $GITHUB_PATH
+          /tmp/gradle-8.5/bin/gradle --version
 
       - name: Create project
         run: |
@@ -80,23 +90,20 @@ jobs:
               img=Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
             else:
               img=Image.new('RGBA',(512,512),(15,23,42,255))
-            # auto-crop cover 512x512
-            def cover_crop(im, size):
-              w,h = im.size
-              ratio = max(size[0]/w, size[1]/h)
-              nw, nh = int(w*ratio), int(h*ratio)
-              im = im.resize((nw,nh), Image.LANCZOS)
-              left = (nw-size[0])//2
-              top = (nh-size[1])//2
-              return im.crop((left,top,left+size[0],top+size[1]))
-            img512 = cover_crop(img, (512,512))
+            w,h=img.size
+            ratio=max(512/w,512/h)
+            nw,nh=int(w*ratio),int(h*ratio)
+            img=img.resize((nw,nh), Image.LANCZOS)
+            left=(nw-512)//2
+            top=(nh-512)//2
+            img512=img.crop((left,top,left+512,top+512))
             for f,s in {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}.items():
               img512.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher.png")
               img512.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher_round.png")
             img512.resize((200,200), Image.LANCZOS).save("app/src/main/res/drawable/splash_icon.png")
-            print("icon auto-cropped ok")
+            print("icon ok")
           except Exception as e:
-            print(f"icon error {e}")
+            print(e)
             img=Image.new('RGBA',(512,512),(15,23,42,255))
             for f in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
               img.save(f"app/src/main/res/{f}/ic_launcher.png")
@@ -118,19 +125,19 @@ jobs:
           try:
             if ',' in b64: b64=b64.split(',')[1]
             img=Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
-            # auto-crop to 800 max
             img.thumbnail((800,800), Image.LANCZOS)
             img.save("app/src/main/res/drawable/splash_center.png")
-            print("splash auto-cropped ok")
+            print("splash ok")
           except Exception as e:
-            print(f"splash error {e}")
+            print(e)
           PY
 
-      - name: Generate files
+      - name: Generate Android files - MULTILINE FIX
         run: |
           cat > settings.gradle << 'EOF'
           include ':app'
           EOF
+
           cat > build.gradle << 'EOF'
           buildscript {
               repositories {
@@ -147,49 +154,123 @@ jobs:
                   mavenCentral()
               }
           }
+          task clean(type: Delete) {
+              delete rootProject.buildDir
+          }
           EOF
+
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
+          android.nonTransitiveRResources=true
           EOF
+
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <resources><color name="colorPrimary">#0f172a</color><color name="splashBackground">#0f172a</color></resources>
           EOF
+
           cat > app/src/main/res/values/themes.xml << 'EOF'
           <resources><style name="SplashTheme" parent="Theme.SplashScreen"><item name="windowSplashScreenBackground">@color/splashBackground</item><item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item><item name="postSplashScreenTheme">@style/AppTheme</item></style><style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar"></style></resources>
           EOF
+
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app"><uses-permission android:name="android.permission.INTERNET"/><application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           EOF
           sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml || true
+
           cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
           package com.web2app;
-          import android.os.Bundle; import android.webkit.WebSettings; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity; import androidx.core.splashscreen.SplashScreen; import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import androidx.appcompat.app.AppCompatActivity;
+          import androidx.core.splashscreen.SplashScreen;
+          import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
           public class MainActivity extends AppCompatActivity {
-            private WebView webView; private SwipeRefreshLayout swipeRefresh;
+            private WebView webView;
+            private SwipeRefreshLayout swipeRefresh;
             @Override protected void onCreate(Bundle savedInstanceState) {
-              SplashScreen.installSplashScreen(this); super.onCreate(savedInstanceState);
-              swipeRefresh=new SwipeRefreshLayout(this); webView=new WebView(this); swipeRefresh.addView(webView); setContentView(swipeRefresh); swipeRefresh.setOnRefreshListener(()->webView.reload());
-              WebSettings s=webView.getSettings(); s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true);
-              webView.setWebViewClient(new WebViewClient(){ @Override public void onPageFinished(WebView v,String u){ super.onPageFinished(v,u); swipeRefresh.setRefreshing(false); } });
+              SplashScreen.installSplashScreen(this);
+              super.onCreate(savedInstanceState);
+              swipeRefresh=new SwipeRefreshLayout(this);
+              webView=new WebView(this);
+              swipeRefresh.addView(webView);
+              setContentView(swipeRefresh);
+              swipeRefresh.setOnRefreshListener(()->webView.reload());
+              WebSettings s=webView.getSettings();
+              s.setJavaScriptEnabled(true);
+              s.setDomStorageEnabled(true);
+              webView.setWebViewClient(new WebViewClient(){
+                @Override public void onPageFinished(WebView v,String u){
+                  super.onPageFinished(v,u);
+                  swipeRefresh.setRefreshing(false);
+                }
+              });
               webView.loadUrl("https://example.com");
             }
-            @Override public void onBackPressed(){ if(webView.canGoBack()) webView.goBack(); else super.onBackPressed(); }
+            @Override public void onBackPressed(){
+              if(webView.canGoBack()) webView.goBack();
+              else super.onBackPressed();
+            }
           }
           JAVA
           sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java || true
+
           cat > app/build.gradle << 'EOF'
-          plugins { id 'com.android.application' }
-          android { namespace 'com.example.app'; compileSdk 34; defaultConfig { applicationId "com.example.app"; minSdk 21; targetSdk 34; versionCode 1; versionName "1.0" } buildTypes { release { minifyEnabled false } } }
-          dependencies { implementation 'androidx.appcompat:appcompat:1.6.1'; implementation 'androidx.core:core-splashscreen:1.0.1'; implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'; implementation 'com.google.android.material:material:1.11.0' }
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.example.app'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.example.app"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      shrinkResources false
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'androidx.core:core-splashscreen:1.0.1'
+              implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+              implementation 'com.google.android.material:material:1.11.0'
+          }
           EOF
           sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle || true
 
-      - name: Build
+          echo "=== Files generated ==="
+          cat settings.gradle
+          echo "---"
+          cat build.gradle
+          echo "---"
+          cat app/build.gradle
+
+      - name: Build APK AAB with Gradle 8.5
         run: |
-          gradle wrapper --gradle-version 8.5 --no-daemon || true
+          export ANDROID_HOME=$HOME/sdk
+          export ANDROID_SDK_ROOT=$HOME/sdk
+          /tmp/gradle-8.5/bin/gradle wrapper --gradle-version 8.5
           chmod +x gradlew || true
-          if [ -f ./gradlew ]; then ./gradlew assembleRelease bundleRelease --no-daemon; else gradle assembleRelease bundleRelease --no-daemon; fi
+          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
           ls -lh app/build/outputs/apk/release/ || true
           ls -lh app/build/outputs/bundle/release/ || true
 
