@@ -1,7 +1,6 @@
 const express = require('express');
 const path = require('path');
 const app = express();
-
 app.use(require('cors')());
 app.use(express.json());
 app.use(express.static('public'));
@@ -14,7 +13,7 @@ app.post('/api/build', async (req, res) => {
   try {
     const r = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/build.yml/dispatches`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ref: 'main', inputs: { ...req.body, buildId } })
     });
     if (!r.ok) throw new Error(await r.text());
@@ -24,34 +23,49 @@ app.post('/api/build', async (req, res) => {
 
 app.get('/api/check/:buildId', async (req, res) => {
   try {
-    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/tags/build-${req.params.buildId}`, {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100`, {
       headers: { Authorization: `Bearer ${TOKEN}` }
     });
-    if (r.ok) {
-      const rel = await r.json();
-      res.json({ ready: true, count: rel.assets.length });
-    } else res.json({ ready: false });
+    const data = await r.json();
+    const found = data.artifacts.filter(a => a.name.includes(req.params.buildId));
+    res.json({ ready: found.length > 0 });
   } catch { res.json({ ready: false }); }
 });
 
-// THIS IS THE DIRECT DOWNLOAD FROM YOUR WEBSITE
+// FIXED DOWNLOAD - Follows GitHub's redirect correctly
 app.get('/api/download/:buildId/:type', async (req, res) => {
   try {
     const { buildId, type } = req.params;
-    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/tags/build-${buildId}`, {
+    const list = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100`, {
       headers: { Authorization: `Bearer ${TOKEN}` }
+    }).then(r => r.json());
+
+    const artifact = list.artifacts.find(a => a.name.includes(buildId) && a.name.toLowerCase().includes(type));
+    if (!artifact) return res.status(404).send('Still building... wait 30 sec and refresh');
+
+    // Step 1: Get redirect URL from GitHub
+    const redirectRes = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      redirect: 'manual'
     });
-    const rel = await r.json();
-    const asset = rel.assets.find(a => a.name.toLowerCase().includes(type));
-    if (!asset) return res.status(404).send('File not ready yet');
     
-    const file = await fetch(asset.url, {
-      headers: { Authorization: `Bearer ${TOKEN}`, Accept: 'application/octet-stream' }
-    });
-    res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
-    res.setHeader('Content-Type', 'application/octet-stream');
-    file.body.pipe(res);
-  } catch (e) { res.status(500).send(e.message); }
+    const downloadUrl = redirectRes.headers.get('location');
+    if (!downloadUrl) throw new Error('No download URL from GitHub');
+
+    // Step 2: Download from Azure (no auth needed)
+    const fileRes = await fetch(downloadUrl);
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${artifact.name}.zip"`);
+    res.setHeader('Content-Type', 'application/zip');
+    
+    // Stream it
+    const { Readable } = require('stream');
+    Readable.fromWeb(fileRes.body).pipe(res);
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Download error: ' + e.message);
+  }
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
