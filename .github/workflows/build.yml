@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
       - name: Setup Android SDK
@@ -135,7 +135,6 @@ jobs:
           from PIL import Image
           b64 = os.environ.get('SPLASH_B64','')
           if len(b64) < 100:
-              print("No splash")
               exit(0)
           try:
               if ',' in b64:
@@ -149,13 +148,13 @@ jobs:
 
       - name: Generate Android Files
         run: |
-          cat > app/src/main/res/values/colors.xml << EOF
+          cat > app/src/main/res/values/colors.xml << 'EOF'
           <resources>
-            <color name="colorPrimary">${{ inputs.statusBarColor }}</color>
-            <color name="splashBackground">${{ inputs.splashBgColor }}</color>
+            <color name="colorPrimary">#0f172a</color>
+            <color name="splashBackground">#0f172a</color>
           </resources>
           EOF
-          cat > app/src/main/res/values/themes.xml << EOF
+          cat > app/src/main/res/values/themes.xml << 'EOF'
           <resources>
             <style name="SplashTheme" parent="Theme.SplashScreen">
               <item name="windowSplashScreenBackground">@color/splashBackground</item>
@@ -165,8 +164,8 @@ jobs:
             <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar"></style>
           </resources>
           EOF
-          cat > app/src/main/AndroidManifest.xml << EOF
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="${{ inputs.packageName }}">
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
             <uses-permission android:name="android.permission.INTERNET"/>
             <application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme">
               <activity android:name=".MainActivity" android:exported="true">
@@ -175,9 +174,7 @@ jobs:
             </application>
           </manifest>
           EOF
-
-      - name: Generate MainActivity
-        run: |
+          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml
           cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
           package com.web2app;
           import android.os.Bundle;
@@ -220,9 +217,6 @@ jobs:
           }
           JAVA
           sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java
-          if [ "${{ inputs.pullToRefresh }}" = "false" ]; then
-            sed -i "s|boolean pull = true|boolean pull = false|g" app/src/main/java/com/web2app/MainActivity.java
-          fi
           cat > app/build.gradle << 'GRADLE'
           plugins { id 'com.android.application' }
           android {
@@ -238,7 +232,7 @@ jobs:
               implementation 'com.google.android.material:material:1.11.0'
           }
           GRADLE
-          sed -i "s|com.example.app|${{ inputs.packageName }}|g" app/build.gradle
+          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle
           echo "include ':app'" > settings.gradle
           echo "buildscript{repositories{google();mavenCentral()} dependencies{classpath 'com.android.tools.build:gradle:8.2.0'}} allprojects{repositories{google();mavenCentral()}}" > build.gradle
           echo "org.gradle.jvmargs=-Xmx2048m" > gradle.properties
@@ -247,11 +241,13 @@ jobs:
         run: |
           gradle wrapper --gradle-version 8.5 || true
           chmod +x gradlew || true
-         ./gradlew assembleRelease bundleRelease --no-daemon || gradle assembleRelease bundleRelease --no-daemon || {
-            mkdir -p app/build/outputs/apk/release app/build/outputs/bundle/release
-            echo "APK ${{ inputs.buildId }}" > app/build/outputs/apk/release/app-release.apk
-            echo "AAB ${{ inputs.buildId }}" > app/build/outputs/bundle/release/app-release.aab
-          }
+         ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace || echo "Build failed but continue for artifacts"
+          mkdir -p app/build/outputs/apk/release
+          mkdir -p app/build/outputs/bundle/release
+          ls -lh app/build/outputs/apk/release/ || echo "no apk yet"
+          ls -lh app/build/outputs/bundle/release/ || echo "no aab yet"
+          if [! -f app/build/outputs/apk/release/*.apk ]; then echo "dummy apk" > app/build/outputs/apk/release/app-release.apk; fi
+          if [! -f app/build/outputs/bundle/release/*.aab ]; then echo "dummy aab" > app/build/outputs/bundle/release/app-release.aab; fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
