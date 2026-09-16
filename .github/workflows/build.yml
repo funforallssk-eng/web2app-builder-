@@ -1,4 +1,4 @@
-name: Build APK AAB Fixed
+name: Build APK AAB
 
 on:
   workflow_dispatch:
@@ -19,22 +19,14 @@ on:
         description: Build ID
         required: true
         type: string
-      iconBase64:
-        description: Icon
-        required: false
-        default: ''
-        type: string
-      splashBase64:
-        description: Splash
-        required: false
-        default: ''
-        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-java@v4
         with:
@@ -60,7 +52,7 @@ jobs:
           yes | $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
           $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
 
-      - name: Setup Gradle 8.5 (Fix 9.7.1 incompatibility)
+      - name: Setup Gradle 8.5
         run: |
           cd /tmp
           wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
@@ -68,76 +60,77 @@ jobs:
           echo "/tmp/gradle-8.5/bin" >> $GITHUB_PATH
           /tmp/gradle-8.5/bin/gradle --version
 
-      - name: Create project
+      - name: Create project dirs
         run: |
           rm -rf app build .gradle gradle gradlew settings.gradle build.gradle gradle.properties
           mkdir -p app/src/main/java/com/web2app
           mkdir -p app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi
           mkdir -p app/src/main/res/drawable app/src/main/res/values
 
-      - name: Icon auto-crop
-        env:
-          ICON_B64: ${{ inputs.iconBase64 }}
+      - name: Restore icon and splash from repo (auto-crop method)
         run: |
+          set -e
+          echo "Looking for temp-icons/${{ inputs.buildId }}-icon.png"
+          ls -lh temp-icons/ || echo "no temp-icons folder"
           pip install Pillow -q
           python3 << 'PY'
-          import base64, io, os
+          import os, glob, base64
           from PIL import Image
-          b64=os.environ.get('ICON_B64','')
-          try:
-            if ',' in b64: b64=b64.split(',')[1]
-            if len(b64)>100:
-              img=Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
-            else:
+          build_id="${{ inputs.buildId }}"
+          icon_path=f"temp-icons/{build_id}-icon.png"
+          splash_path=f"temp-icons/{build_id}-splash.png"
+          
+          def make_default():
               img=Image.new('RGBA',(512,512),(15,23,42,255))
-            w,h=img.size
-            ratio=max(512/w,512/h)
-            nw,nh=int(w*ratio),int(h*ratio)
-            img=img.resize((nw,nh), Image.LANCZOS)
-            left=(nw-512)//2
-            top=(nh-512)//2
-            img512=img.crop((left,top,left+512,top+512))
-            for f,s in {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}.items():
-              img512.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher.png")
-              img512.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher_round.png")
-            img512.resize((200,200), Image.LANCZOS).save("app/src/main/res/drawable/splash_icon.png")
-            print("icon ok")
-          except Exception as e:
-            print(e)
-            img=Image.new('RGBA',(512,512),(15,23,42,255))
-            for f in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
-              img.save(f"app/src/main/res/{f}/ic_launcher.png")
-              img.save(f"app/src/main/res/{f}/ic_launcher_round.png")
-            img.save("app/src/main/res/drawable/splash_icon.png")
-          PY
-
-      - name: Splash auto-crop
-        env:
-          SPLASH_B64: ${{ inputs.splashBase64 }}
-        run: |
-          python3 << 'PY'
-          import base64, io, os
-          from PIL import Image
-          b64=os.environ.get('SPLASH_B64','')
-          if len(b64)<100:
-            print("no splash")
-            exit(0)
+              for f in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
+                  img.save(f"app/src/main/res/{f}/ic_launcher.png")
+                  img.save(f"app/src/main/res/{f}/ic_launcher_round.png")
+              img.resize((200,200)).save("app/src/main/res/drawable/splash_icon.png")
+          
+          # ICON
           try:
-            if ',' in b64: b64=b64.split(',')[1]
-            img=Image.open(io.BytesIO(base64.b64decode(b64))).convert('RGBA')
-            img.thumbnail((800,800), Image.LANCZOS)
-            img.save("app/src/main/res/drawable/splash_center.png")
-            print("splash ok")
+              if os.path.exists(icon_path):
+                  print(f"Found icon {icon_path}")
+                  img=Image.open(icon_path).convert('RGBA')
+                  # auto-crop cover 512x512
+                  w,h=img.size
+                  ratio=max(512/w,512/h)
+                  nw,nh=int(w*ratio),int(h*ratio)
+                  img=img.resize((nw,nh), Image.LANCZOS)
+                  left=(nw-512)//2
+                  top=(nh-512)//2
+                  img512=img.crop((left,top,left+512,top+512))
+                  for f,s in {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}.items():
+                      img512.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher.png")
+                      img512.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher_round.png")
+                  img512.resize((200,200), Image.LANCZOS).save("app/src/main/res/drawable/splash_icon.png")
+                  print("icon auto-cropped from repo file")
+              else:
+                  print("No custom icon, using default")
+                  make_default()
           except Exception as e:
-            print(e)
+              print(f"icon error {e}")
+              make_default()
+          
+          # SPLASH
+          try:
+              if os.path.exists(splash_path):
+                  print(f"Found splash {splash_path}")
+                  img=Image.open(splash_path).convert('RGBA')
+                  img.thumbnail((800,800), Image.LANCZOS)
+                  img.save("app/src/main/res/drawable/splash_center.png")
+                  print("splash saved")
+              else:
+                  print("No custom splash")
+          except Exception as e:
+              print(f"splash error {e}")
           PY
 
-      - name: Generate Android files - MULTILINE FIX
+      - name: Generate files
         run: |
           cat > settings.gradle << 'EOF'
           include ':app'
           EOF
-
           cat > build.gradle << 'EOF'
           buildscript {
               repositories {
@@ -158,26 +151,20 @@ jobs:
               delete rootProject.buildDir
           }
           EOF
-
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
-          android.nonTransitiveRResources=true
           EOF
-
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <resources><color name="colorPrimary">#0f172a</color><color name="splashBackground">#0f172a</color></resources>
           EOF
-
           cat > app/src/main/res/values/themes.xml << 'EOF'
           <resources><style name="SplashTheme" parent="Theme.SplashScreen"><item name="windowSplashScreenBackground">@color/splashBackground</item><item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item><item name="postSplashScreenTheme">@style/AppTheme</item></style><style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar"></style></resources>
           EOF
-
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app"><uses-permission android:name="android.permission.INTERNET"/><application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           EOF
           sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml || true
-
           cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
           package com.web2app;
           import android.os.Bundle;
@@ -216,16 +203,13 @@ jobs:
           }
           JAVA
           sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java || true
-
           cat > app/build.gradle << 'EOF'
           plugins {
               id 'com.android.application'
           }
-
           android {
               namespace 'com.example.app'
               compileSdk 34
-
               defaultConfig {
                   applicationId "com.example.app"
                   minSdk 21
@@ -233,21 +217,16 @@ jobs:
                   versionCode 1
                   versionName "1.0"
               }
-
               buildTypes {
                   release {
                       minifyEnabled false
-                      shrinkResources false
-                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
                   }
               }
-
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
           }
-
           dependencies {
               implementation 'androidx.appcompat:appcompat:1.6.1'
               implementation 'androidx.core:core-splashscreen:1.0.1'
@@ -257,35 +236,28 @@ jobs:
           EOF
           sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle || true
 
-          echo "=== Files generated ==="
-          cat settings.gradle
-          echo "---"
-          cat build.gradle
-          echo "---"
-          cat app/build.gradle
-
-      - name: Build APK AAB with Gradle 8.5
+      - name: Build APK AAB
         run: |
           export ANDROID_HOME=$HOME/sdk
-          export ANDROID_SDK_ROOT=$HOME/sdk
           /tmp/gradle-8.5/bin/gradle wrapper --gradle-version 8.5
-          chmod +x gradlew || true
+          chmod +x gradlew
           ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
-          ls -lh app/build/outputs/apk/release/ || true
-          ls -lh app/build/outputs/bundle/release/ || true
+          ls -lh app/build/outputs/apk/release/
+          ls -lh app/build/outputs/bundle/release/
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: apk-free-${{ inputs.buildId }}
           path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: warn
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: aab-paid-${{ inputs.buildId }}
           path: app/build/outputs/bundle/release/*.aab
-          if-no-files-found: warn
+
+      - name: Cleanup temp icon (optional)
+        if: always()
+        run: |
+          rm -rf temp-icons/${{ inputs.buildId }}-icon.png temp-icons/${{ inputs.buildId }}-splash.png || true
