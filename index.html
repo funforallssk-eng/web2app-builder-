@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width"><title>Web2App Builder</title>
+<style>body{font-family:sans-serif;max-width:600px;margin:50px auto;padding:20px}input{width:100%;padding:12px;margin:8px 0;border:1px solid #ccc;border-radius:8px}button{width:100%;padding:14px;background:#000;color:#fff;border:0;border-radius:8px;cursor:pointer;font-size:16px}.btn{display:inline-block;padding:15px 30px;margin:10px;color:#fff;text-decoration:none;border-radius:8px}</style>
+</head>
+<body>
+<h1>🚀 Web2App Builder</h1>
+<p>Convert any website to APK + AAB in 3 mins</p>
+<form id="buildForm">
+<input id="url" placeholder="https://example.com" required>
+<input id="appName" placeholder="My App Name" required>
+<input id="packageName" placeholder="com.example.myapp" required>
+<button id="buildBtn">Build APK + AAB</button>
+</form>
+<div id="status" style="margin-top:20px"></div>
+<div id="downloadArea" style="display:none;margin-top:20px;text-align:center">
+<h3>✅ Build Ready!</h3>
+<a id="apkBtn" href="#" class="btn" style="background:green">📱 Download APK</a>
+<a id="aabBtn" href="#" class="btn" style="background:blue">📦 Download AAB</a>
+</div>
+<script>
+document.getElementById('buildForm').addEventListener('submit', async (e)=>{
+e.preventDefault();
+const btn=document.getElementById('buildBtn'),status=document.getElementById('status');
+btn.disabled=true; btn.innerText='Building... (3-4 mins)';
+status.innerHTML='⏳ Build started...<br><div style="background:#eee;height:20px;border-radius:10px;overflow:hidden;margin:10px 0"><div id="progress" style="width:10%;background:green;height:100%"></div></div><small id="timer">0s</small>';
+let seconds=0; const timer=setInterval(()=>{seconds+=5; document.getElementById('timer').innerText=seconds+'s elapsed'; document.getElementById('progress').style.width=Math.min(90,10+seconds)+'%';},5000);
+try{
+const payload={url:document.getElementById('url').value, appName:document.getElementById('appName').value, packageName:document.getElementById('packageName').value};
+const res=await fetch('/api/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
+if(!res.success) throw new Error(res.error);
+const buildId=res.buildId;
+const checkInt=setInterval(async()=>{
+const check=await fetch('/api/check/'+buildId).then(r=>r.json());
+if(check.ready){
+clearInterval(checkInt); clearInterval(timer);
+status.innerHTML='✅ Build Complete!'; document.getElementById('progress').style.width='100%';
+document.getElementById('downloadArea').style.display='block';
+document.getElementById('apkBtn').href=check.apkUrl;
+document.getElementById('aabBtn').href=check.aabUrl;
+btn.disabled=false; btn.innerText='Build Another App';
+}
+},15000);
+}catch(err){status.innerHTML='❌ '+err.message; btn.disabled=false; btn.innerText='Build APK + AAB'; clearInterval(timer);}
+});
+</script>
+</body>
+</html>
