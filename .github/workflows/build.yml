@@ -1,4 +1,4 @@
-name: Build APK AAB Simple
+name: Build APK AAB Fixed Final
 
 on:
   workflow_dispatch:
@@ -45,7 +45,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK - FIXED PATH
+      - name: Setup Android SDK
         run: |
           set -e
           mkdir -p $HOME/sdk/cmdline-tools
@@ -60,19 +60,16 @@ jobs:
           echo "ANDROID_SDK_ROOT=$HOME/sdk" >> $GITHUB_ENV
           echo "$HOME/sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$HOME/sdk/platform-tools" >> $GITHUB_PATH
-          echo "Checking sdkmanager at $HOME/sdk/cmdline-tools/latest/bin/sdkmanager"
-          ls -lh $HOME/sdk/cmdline-tools/latest/bin/
           $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --version
           yes | $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
           $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
-          echo "SDK setup done"
 
-      - name: Create project
+      - name: Create project dirs
         run: |
+          rm -rf app build .gradle gradle gradlew settings.gradle build.gradle gradle.properties
           mkdir -p app/src/main/java/com/web2app
           mkdir -p app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi
           mkdir -p app/src/main/res/drawable app/src/main/res/values
-          echo "dirs created"
 
       - name: Make icon
         env:
@@ -103,18 +100,49 @@ jobs:
             img.save("app/src/main/res/drawable/splash_icon.png")
           PY
 
-      - name: Make files
+      - name: Generate Android files - FIXED GRADLE
         run: |
+          cat > settings.gradle << 'EOF'
+          include ':app'
+          EOF
+
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.0'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
+
+          cat > gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRResources=true
+          EOF
+
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <resources><color name="colorPrimary">#0f172a</color><color name="splashBackground">#0f172a</color></resources>
           EOF
+
           cat > app/src/main/res/values/themes.xml << 'EOF'
           <resources><style name="SplashTheme" parent="Theme.SplashScreen"><item name="windowSplashScreenBackground">@color/splashBackground</item><item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item><item name="postSplashScreenTheme">@style/AppTheme</item></style><style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar"></style></resources>
           EOF
+
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app"><uses-permission android:name="android.permission.INTERNET"/><application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/SplashTheme"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
           EOF
           sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml || true
+
           cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
           package com.web2app;
           import android.os.Bundle; import android.webkit.WebSettings; import android.webkit.WebView; import android.webkit.WebViewClient; import androidx.appcompat.app.AppCompatActivity; import androidx.core.splashscreen.SplashScreen; import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -131,32 +159,71 @@ jobs:
           }
           JAVA
           sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java || true
-          cat > app/build.gradle << 'GRADLE'
-          plugins { id 'com.android.application' }
-          android { namespace 'com.example.app'; compileSdk 34; defaultConfig { applicationId "com.example.app"; minSdk 21; targetSdk 34; versionCode 1; versionName "1.0" } buildTypes { release { minifyEnabled false } } }
-          dependencies { implementation 'androidx.appcompat:appcompat:1.6.1'; implementation 'androidx.core:core-splashscreen:1.0.1'; implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'; implementation 'com.google.android.material:material:1.11.0' }
-          GRADLE
-          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle || true
-          echo "include ':app'" > settings.gradle
-          echo "buildscript{repositories{google();mavenCentral()} dependencies{classpath 'com.android.tools.build:gradle:8.2.0'}} allprojects{repositories{google();mavenCentral()}}" > build.gradle
-          echo "org.gradle.jvmargs=-Xmx2048m" > gradle.properties
 
-      - name: Build APK AAB
+          cat > app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.example.app'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.example.app"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      shrinkResources false
+                  }
+              }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'androidx.core:core-splashscreen:1.0.1'
+              implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+              implementation 'com.google.android.material:material:1.11.0'
+          }
+          EOF
+          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle || true
+
+          echo "=== Generated files ==="
+          cat settings.gradle
+          cat build.gradle
+          cat app/build.gradle
+
+      - name: Build APK AAB - FIXED
         run: |
-          gradle wrapper --gradle-version 8.5 || true
-          chmod +x gradlew || true
-          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
+          set -e
+          echo "Trying gradle wrapper..."
+          if gradle wrapper --gradle-version 8.5 --no-daemon; then
+            echo "Wrapper created"
+            chmod +x gradlew || true
+            ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
+          else
+            echo "Wrapper failed, using gradle directly"
+            gradle assembleRelease bundleRelease --no-daemon --stacktrace
+          fi
+          echo "Build outputs:"
+          find app/build/outputs -type f || echo "No outputs found"
           ls -lh app/build/outputs/apk/release/ || true
           ls -lh app/build/outputs/bundle/release/ || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: apk-free-${{ inputs.buildId }}
           path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: aab-paid-${{ inputs.buildId }}
           path: app/build/outputs/bundle/release/*.aab
+          if-no-files-found: warn
