@@ -1,268 +1,168 @@
-name: Build FlightsNetwork Moto Fix
+const express = require('express');
+const path = require('path');
+const app = express();
+app.use(require('cors')());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.static('public'));
+app.use(express.static(__dirname));
 
-on:
-  workflow_dispatch:
-    inputs:
-      url:
-        description: Website URL
-        required: true
-        type: string
-      appName:
-        description: App Name
-        required: true
-        type: string
-      packageName:
-        description: Package ID
-        required: true
-        type: string
-      buildId:
-        description: Build ID
-        required: true
-        type: string
+const REPO = (process.env.GITHUB_REPO || 'funforallssk-eng/web2app-builder-').trim();
+const TOKEN = (process.env.GITHUB_TOKEN || '').trim();
+const BRANCH = (process.env.GITHUB_BRANCH || 'main').trim();
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - name: Setup SDK
-        run: |
-          mkdir -p $HOME/sdk/cmdline-tools
-          cd $HOME/sdk/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O t.zip
-          unzip -q t.zip
-          mv cmdline-tools latest
-          echo "ANDROID_HOME=$HOME/sdk" >> $GITHUB_ENV
-          echo "$HOME/sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          yes | $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-          $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
-      - name: Setup Gradle 8.5
-        run: |
-          cd /tmp
-          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-          unzip -q gradle-8.5-bin.zip
-          echo "/tmp/gradle-8.5/bin" >> $GITHUB_PATH
-      - name: Create project
-        run: |
-          rm -rf app build .gradle gradle gradlew settings.gradle build.gradle gradle.properties
-          mkdir -p app/src/main/java/com/web2app
-          mkdir -p app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi app/src/main/res/values
-      - name: Keystore Signed
-        run: |
-          keytool -genkey -v -keystore release.keystore -alias release -keyalg RSA -keysize 2048 -validity 10000 -storepass android123 -keypass android123 -dname "CN=FlightsNetwork, OU=Mobile, O=FlightsNetwork, L=India, ST=Punjab, C=IN"
-      - name: Icon auto-crop
-        run: |
-          pip install Pillow -q
-          python3 << 'PY'
-          import os
-          from PIL import Image
-          bid="${{ inputs.buildId }}"
-          p=f"temp-icons/{bid}-icon.png"
-          def defa():
-              im=Image.new('RGBA',(512,512),(0,102,204,255))
-              for f in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
-                  im.save(f"app/src/main/res/{f}/ic_launcher.png")
-                  im.save(f"app/src/main/res/{f}/ic_launcher_round.png")
-          try:
-              if os.path.exists(p):
-                  im=Image.open(p).convert('RGBA')
-                  w,h=im.size
-                  r=max(512/w,512/h)
-                  nw,nh=int(w*r),int(h*r)
-                  im=im.resize((nw,nh), Image.LANCZOS)
-                  im=im.crop(((nw-512)//2,(nh-512)//2,(nw+512)//2,(nh+512)//2))
-                  for f,s in {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}.items():
-                      im.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher.png")
-                      im.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher_round.png")
-              else:
-                  defa()
-          except Exception as e:
-              print(e)
-              defa()
-          PY
-      - name: Generate CRASH-PROOF files for Moto Edge 60 Pro + flightsnetwork.co.in
-        run: |
-          cat > settings.gradle << 'EOF'
-          include ':app'
-          EOF
-          cat > build.gradle << 'EOF'
-          buildscript {
-              repositories { google(); mavenCentral() }
-              dependencies { classpath 'com.android.tools.build:gradle:8.2.0' }
-          }
-          allprojects { repositories { google(); mavenCentral() } }
-          EOF
-          cat > gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx2048m
-          android.useAndroidX=false
-          EOF
-          cat > app/src/main/res/values/colors.xml << 'EOF'
-          <resources><color name="bg">#ffffff</color></resources>
-          EOF
-          cat > app/src/main/res/values/themes.xml << 'EOF'
-          <resources>
-              <style name="AppTheme" parent="android:Theme.NoTitleBar">
-                  <item name="android:windowBackground">@color/bg</item>
-              </style>
-          </resources>
-          EOF
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
-              <application android:icon="@mipmap/ic_launcher" android:theme="@style/AppTheme" android:hardwareAccelerated="true" android:usesCleartextTraffic="true" android:largeHeap="true">
-                  <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|keyboardHidden|screenSize|screenLayout"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
-              </application>
-          </manifest>
-          EOF
-          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml
+console.log(`BOOT REPO=${REPO} BRANCH=${BRANCH} TOKEN=${TOKEN?'SET':'MISSING'}`);
 
-          # ULTRA CRASH-PROOF MainActivity for flightsnetwork.co.in on Moto Edge 60 Pro
-          cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
-          package com.web2app;
-          import android.app.Activity;
-          import android.os.Bundle;
-          import android.webkit.WebSettings;
-          import android.webkit.WebView;
-          import android.webkit.WebViewClient;
-          import android.widget.LinearLayout;
-          import android.view.ViewGroup;
+const paidBuilds = new Set();
 
-          public class MainActivity extends Activity {
-              private WebView webView;
-              
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  
-                  // Create layout
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                  
-                  // Create WebView - minimal settings to prevent crash on Moto Edge 60 Pro
-                  webView = new WebView(this);
-                  webView.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                  
-                  // Basic settings only - no risky features
-                  WebSettings s = webView.getSettings();
-                  s.setJavaScriptEnabled(true);
-                  s.setDomStorageEnabled(true);
-                  s.setJavaScriptCanOpenWindowsAutomatically(true);
-                  s.setLoadsImagesAutomatically(true);
-                  s.setUseWideViewPort(true);
-                  s.setLoadWithOverviewMode(true);
-                  s.setAllowFileAccess(true);
-                  s.setAllowContentAccess(true);
-                  s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-                  
-                  // Keep inside WebView, prevent external browser
-                  webView.setWebViewClient(new WebViewClient() {
-                      @Override
-                      public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                          // Load all urls inside WebView - fixes crash on some sites
-                          if (url != null) {
-                              view.loadUrl(url);
-                          }
-                          return true;
-                      }
-                      
-                      @Override
-                      public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                          // Don't crash on error, just log
-                          super.onReceivedError(view, errorCode, description, failingUrl);
-                      }
-                  });
-                  
-                  // Load flightsnetwork.co.in
-                  webView.loadUrl("https://flightsnetwork.co.in/");
-                  
-                  root.addView(webView);
-                  setContentView(root);
-              }
-              
-              @Override
-              public void onBackPressed() {
-                  if (webView != null && webView.canGoBack()) {
-                      webView.goBack();
-                  } else {
-                      super.onBackPressed();
-                  }
-              }
-              
-              @Override
-              protected void onDestroy() {
-                  if (webView != null) {
-                      webView.destroy();
-                  }
-                  super.onDestroy();
-              }
-          }
-          JAVA
-          sed -i "s|https://flightsnetwork.co.in/|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java || true
+// Helper to upload file to GitHub repo via Contents API
+async function uploadFileToRepo(filePath, contentBase64, message) {
+  // First check if file exists to get sha
+  let sha = null;
+  try {
+    const check = await fetch(`https://api.github.com/repos/${REPO}/contents/${filePath}?ref=${BRANCH}`, {
+      headers: { 'Authorization': `Bearer ${TOKEN}`, 'Accept': 'application/vnd.github+json' }
+    });
+    if (check.ok) {
+      const data = await check.json();
+      sha = data.sha;
+    }
+  } catch {}
+  
+  const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${filePath}`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${TOKEN}`,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      message,
+      content: contentBase64,
+      branch: BRANCH,
+      ...(sha ? { sha } : {})
+    })
+  });
+  const txt = await res.text();
+  console.log(`Upload ${filePath} ${res.status} ${txt.substring(0,200)}`);
+  if (!res.ok) throw new Error(`Upload failed ${filePath} ${res.status}: ${txt}`);
+  return true;
+}
 
-          cat > app/build.gradle << 'EOF'
-          plugins { id 'com.android.application' }
-          android {
-              namespace 'com.example.app'
-              compileSdk 34
-              signingConfigs {
-                  release {
-                      storeFile file('../release.keystore')
-                      storePassword 'android123'
-                      keyAlias 'release'
-                      keyPassword 'android123'
-                      v1SigningEnabled true
-                      v2SigningEnabled true
-                  }
-              }
-              defaultConfig {
-                  applicationId "com.example.app"
-                  minSdk 21
-                  targetSdk 33
-                  versionCode 1
-                  versionName "1.0"
-              }
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                      signingConfig signingConfigs.release
-                  }
-              }
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_1_8
-                  targetCompatibility JavaVersion.VERSION_1_8
-              }
-          }
-          dependencies {}
-          EOF
-          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle
+app.get('/api/health', (req,res)=>res.json({ok:true, repo:REPO, branch:BRANCH, tokenSet:!!TOKEN}));
 
-      - name: Build APK
-        run: |
-          export ANDROID_HOME=$HOME/sdk
-          /tmp/gradle-8.5/bin/gradle wrapper --gradle-version 8.5
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
-          ls -lh app/build/outputs/apk/release/
-          $HOME/sdk/build-tools/34.0.0/apksigner verify --verbose app/build/outputs/apk/release/*.apk || true
+app.get('/api/debug', async (req,res)=>{
+  if(!TOKEN) return res.json({error:'TOKEN missing', repo:REPO});
+  try{
+    const r = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows`, {
+      headers: { 'Authorization': `Bearer ${TOKEN}`, 'Accept': 'application/vnd.github+json' }
+    });
+    const data = await r.json();
+    res.json({repo:REPO, branch:BRANCH, tokenSet:true, status:r.status, workflows:(data.workflows||[]).map(w=>w.path), info:'build.yml must have 4 inputs: url,appName,packageName,buildId - NO base64 inputs'});
+  }catch(e){ res.json({error:e.message}); }
+});
 
-      - name: Upload APK Free
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk-free-${{ inputs.buildId }}
-          path: app/build/outputs/apk/release/*.apk
+// Build - NO large inputs, upload icons as repo files
+app.post('/api/build', async (req,res)=>{
+  const buildId = Date.now().toString();
+  const {url, appName, packageName, iconBase64='', splashBase64=''} = req.body;
+  
+  if(!url || !appName || !packageName) return res.status(400).json({success:false, error:'Missing fields'});
+  if(!TOKEN) return res.status(500).json({success:false, error:'GITHUB_TOKEN missing'});
 
-      - name: Upload AAB Paid
-        uses: actions/upload-artifact@v4
-        with:
-          name: aab-paid-${{ inputs.buildId }}
-          path: app/build/outputs/bundle/release/*.aab
-          if-no-files-found: ignore
+  try{
+    // 1. Upload icons to repo if provided - as files, not as workflow inputs (fixes "inputs are too large")
+    if (iconBase64 && iconBase64.length > 100) {
+      let b64 = iconBase64;
+      if (b64.includes(',')) b64 = b64.split(',')[1];
+      // Ensure valid base64
+      b64 = b64.replace(/\s/g,'');
+      await uploadFileToRepo(`temp-icons/${buildId}-icon.png`, b64, `Add icon for ${buildId}`);
+      console.log(`✅ Icon uploaded temp-icons/${buildId}-icon.png`);
+    }
+    if (splashBase64 && splashBase64.length > 100) {
+      let b64 = splashBase64;
+      if (b64.includes(',')) b64 = b64.split(',')[1];
+      b64 = b64.replace(/\s/g,'');
+      await uploadFileToRepo(`temp-icons/${buildId}-splash.png`, b64, `Add splash for ${buildId}`);
+      console.log(`✅ Splash uploaded`);
+    }
+
+    // 2. Trigger workflow with ONLY 4 small inputs - never "too large"
+    const payload = {
+      ref: BRANCH,
+      inputs: {
+        url: String(url).substring(0,200),
+        appName: String(appName).substring(0,50),
+        packageName: String(packageName).substring(0,100),
+        buildId
+      }
+    };
+    console.log(`🚀 Triggering ${buildId} with 4 inputs only (no base64)`);
+    
+    const githubRes = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/build.yml/dispatches`, {
+      method:'POST',
+      headers:{
+        'Authorization': `Bearer ${TOKEN}`,
+        'Content-Type':'application/json',
+        'Accept':'application/vnd.github+json'
+      },
+      body: JSON.stringify(payload)
+    });
+    const text = await githubRes.text();
+    console.log(`GitHub ${githubRes.status}: ${text.substring(0,300)}`);
+    
+    if(!githubRes.ok){
+      return res.status(githubRes.status).json({success:false, error:`GitHub ${githubRes.status}: ${text}`, githubResponse:text});
+    }
+    
+    res.json({success:true, buildId, message:'Build triggered - icons uploaded as repo files, no large inputs'});
+  }catch(e){
+    console.error(e);
+    res.status(500).json({success:false, error:e.message});
+  }
+});
+
+app.get('/api/check/:buildId', async (req,res)=>{
+  try{
+    const r = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100`, {
+      headers:{'Authorization':`Bearer ${TOKEN}`,'Accept':'application/vnd.github+json'}
+    });
+    const data = await r.json();
+    const found = (data.artifacts||[]).filter(a=>a.name.includes(req.params.buildId));
+    res.json({ready:found.length>0, apkReady:found.some(a=>a.name.toLowerCase().includes('apk')), aabReady:found.some(a=>a.name.toLowerCase().includes('aab')), count:found.length, artifacts:found.map(f=>f.name), isPaid:paidBuilds.has(req.params.buildId)});
+  }catch(e){ res.json({ready:false, error:e.message}); }
+});
+
+app.post('/api/verify-payment', (req,res)=>{
+  const {buildId, utr} = req.body;
+  if(!buildId) return res.status(400).json({success:false, error:'buildId required'});
+  if(!utr || utr.length < 6) return res.status(400).json({success:false, error:'UTR min 6 chars'});
+  paidBuilds.add(buildId);
+  console.log(`✅ PAID ${buildId} ${utr}`);
+  res.json({success:true, message:'Payment verified'});
+});
+
+app.get('/api/download/:buildId/:type', async (req,res)=>{
+  try{
+    const {buildId, type} = req.params;
+    const isAAB = type.toLowerCase().includes('aab');
+    if(isAAB && !paidBuilds.has(buildId)){
+      return res.status(402).json({error:'PAID_REQUIRED', message:'AAB ₹499', upi:'sandeep.k876@ptaxis', amount:499, buildId});
+    }
+    const list = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100`, {
+      headers:{'Authorization':`Bearer ${TOKEN}`,'Accept':'application/vnd.github+json'}
+    }).then(r=>r.json());
+    const artifact = (list.artifacts||[]).find(a=>a.name.includes(buildId) && a.name.toLowerCase().includes(type.toLowerCase()));
+    if(!artifact) return res.status(404).send(`Building... ${buildId} ${type} not ready`);
+    const red = await fetch(`https://api.github.com/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {headers:{'Authorization':`Bearer ${TOKEN}`}, redirect:'manual'});
+    const dl = red.headers.get('location');
+    const file = await fetch(dl);
+    res.setHeader('Content-Disposition',`attachment; filename="${artifact.name}.zip"`);
+    res.setHeader('Content-Type','application/zip');
+    require('stream').Readable.fromWeb(file.body).pipe(res);
+  }catch(e){ res.status(500).send(e.message); }
+});
+
+app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
+
+app.listen(process.env.PORT||3000, ()=>console.log(`🚀 Server NO-LARGE-INPUTS fixed on ${process.env.PORT||3000}`));
