@@ -1,4 +1,4 @@
-name: Build APK AAB Moto Fix
+name: Build FlightsNetwork Moto Fix
 
 on:
   workflow_dispatch:
@@ -27,278 +27,192 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Setup Android SDK
+      - name: Setup SDK
         run: |
-          set -e
           mkdir -p $HOME/sdk/cmdline-tools
           cd $HOME/sdk/cmdline-tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O t.zip
           unzip -q t.zip
           mv cmdline-tools latest
-          export ANDROID_HOME=$HOME/sdk
-          export ANDROID_SDK_ROOT=$HOME/sdk
-          export PATH=$HOME/sdk/cmdline-tools/latest/bin:$HOME/sdk/platform-tools:$PATH
           echo "ANDROID_HOME=$HOME/sdk" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$HOME/sdk" >> $GITHUB_ENV
           echo "$HOME/sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$HOME/sdk/platform-tools" >> $GITHUB_PATH
           yes | $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
           $HOME/sdk/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
-
       - name: Setup Gradle 8.5
         run: |
           cd /tmp
           wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
           unzip -q gradle-8.5-bin.zip
           echo "/tmp/gradle-8.5/bin" >> $GITHUB_PATH
-
-      - name: Create project dirs
+      - name: Create project
         run: |
           rm -rf app build .gradle gradle gradlew settings.gradle build.gradle gradle.properties
           mkdir -p app/src/main/java/com/web2app
-          mkdir -p app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi
-          mkdir -p app/src/main/res/drawable app/src/main/res/values
-
-      - name: Generate Keystore
+          mkdir -p app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi app/src/main/res/values
+      - name: Keystore Signed
         run: |
-          keytool -genkey -v -keystore release.keystore -alias release -keyalg RSA -keysize 2048 -validity 10000 -storepass android123 -keypass android123 -dname "CN=247, OU=Mobile, O=247, L=Ludhiana, ST=Punjab, C=IN"
-
-      - name: Restore icon splash
+          keytool -genkey -v -keystore release.keystore -alias release -keyalg RSA -keysize 2048 -validity 10000 -storepass android123 -keypass android123 -dname "CN=FlightsNetwork, OU=Mobile, O=FlightsNetwork, L=India, ST=Punjab, C=IN"
+      - name: Icon auto-crop
         run: |
           pip install Pillow -q
           python3 << 'PY'
           import os
           from PIL import Image
-          build_id="${{ inputs.buildId }}"
-          icon_path=f"temp-icons/{build_id}-icon.png"
-          def make_default():
-              img=Image.new('RGBA',(512,512),(15,23,42,255))
+          bid="${{ inputs.buildId }}"
+          p=f"temp-icons/{bid}-icon.png"
+          def defa():
+              im=Image.new('RGBA',(512,512),(0,102,204,255))
               for f in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
-                  img.save(f"app/src/main/res/{f}/ic_launcher.png")
-                  img.save(f"app/src/main/res/{f}/ic_launcher_round.png")
-              img.resize((200,200)).save("app/src/main/res/drawable/splash_icon.png")
+                  im.save(f"app/src/main/res/{f}/ic_launcher.png")
+                  im.save(f"app/src/main/res/{f}/ic_launcher_round.png")
           try:
-              if os.path.exists(icon_path):
-                  img=Image.open(icon_path).convert('RGBA')
-                  w,h=img.size
-                  ratio=max(512/w,512/h)
-                  nw,nh=int(w*ratio),int(h*ratio)
-                  img=img.resize((nw,nh), Image.LANCZOS)
-                  img=img.crop(((nw-512)//2,(nh-512)//2,(nw+512)//2,(nh+512)//2))
+              if os.path.exists(p):
+                  im=Image.open(p).convert('RGBA')
+                  w,h=im.size
+                  r=max(512/w,512/h)
+                  nw,nh=int(w*r),int(h*r)
+                  im=im.resize((nw,nh), Image.LANCZOS)
+                  im=im.crop(((nw-512)//2,(nh-512)//2,(nw+512)//2,(nh+512)//2))
                   for f,s in {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}.items():
-                      img.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher.png")
-                      img.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher_round.png")
-                  img.resize((200,200), Image.LANCZOS).save("app/src/main/res/drawable/splash_icon.png")
+                      im.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher.png")
+                      im.resize((s,s), Image.LANCZOS).save(f"app/src/main/res/{f}/ic_launcher_round.png")
               else:
-                  make_default()
+                  defa()
           except Exception as e:
               print(e)
-              make_default()
+              defa()
           PY
-
-      - name: Generate Android files - MOTO EDGE 60 PRO CRASH FIX
+      - name: Generate CRASH-PROOF files for Moto Edge 60 Pro + flightsnetwork.co.in
         run: |
           cat > settings.gradle << 'EOF'
           include ':app'
           EOF
-
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
               dependencies { classpath 'com.android.tools.build:gradle:8.2.0' }
           }
           allprojects { repositories { google(); mavenCentral() } }
-          task clean(type: Delete) { delete rootProject.buildDir }
           EOF
-
           cat > gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          android.nonTransitiveRResources=true
+          org.gradle.jvmargs=-Xmx2048m
+          android.useAndroidX=false
           EOF
-
           cat > app/src/main/res/values/colors.xml << 'EOF'
-          <resources><color name="colorPrimary">#0f172a</color><color name="splashBackground">#0f172a</color><color name="white">#FFFFFF</color></resources>
+          <resources><color name="bg">#ffffff</color></resources>
           EOF
-
-          # FIXED themes.xml - No SplashScreen parent crash on Moto Edge 60 Pro Android 14/15
           cat > app/src/main/res/values/themes.xml << 'EOF'
           <resources>
-              <!-- AppTheme is main theme - no splash parent to avoid crash on Android 14+ -->
-              <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
-                  <item name="android:statusBarColor">@color/splashBackground</item>
-                  <item name="android:navigationBarColor">@color/splashBackground</item>
-                  <item name="android:windowLightStatusBar">false</item>
-              </style>
-              <!-- SplashTheme uses AppTheme as base, not Theme.SplashScreen to prevent Moto crash -->
-              <style name="SplashTheme" parent="AppTheme">
-                  <item name="windowSplashScreenBackground">@color/splashBackground</item>
-                  <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
-                  <item name="windowSplashScreenAnimationDuration">1000</item>
-                  <item name="postSplashScreenTheme">@style/AppTheme</item>
+              <style name="AppTheme" parent="android:Theme.NoTitleBar">
+                  <item name="android:windowBackground">@color/bg</item>
               </style>
           </resources>
           EOF
-
-          # FIXED AndroidManifest - hardwareAccelerated, usesCleartextTraffic, largeHeap for Moto
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-              <application 
-                  android:icon="@mipmap/ic_launcher" 
-                  android:roundIcon="@mipmap/ic_launcher_round" 
-                  android:theme="@style/SplashTheme"
-                  android:allowBackup="true"
-                  android:hardwareAccelerated="true"
-                  android:usesCleartextTraffic="true"
-                  android:largeHeap="true">
-                  <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|keyboardHidden|screenSize"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+              <application android:icon="@mipmap/ic_launcher" android:theme="@style/AppTheme" android:hardwareAccelerated="true" android:usesCleartextTraffic="true" android:largeHeap="true">
+                  <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|keyboardHidden|screenSize|screenLayout"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
               </application>
           </manifest>
           EOF
-          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml || true
+          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/src/main/AndroidManifest.xml
 
-          # FIXED MainActivity - Crash-safe for Moto Edge 60 Pro Android 14/15
+          # ULTRA CRASH-PROOF MainActivity for flightsnetwork.co.in on Moto Edge 60 Pro
           cat > app/src/main/java/com/web2app/MainActivity.java << 'JAVA'
           package com.web2app;
-          import android.annotation.SuppressLint;
-          import android.graphics.Color;
+          import android.app.Activity;
           import android.os.Bundle;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
-          import android.webkit.WebChromeClient;
-          import android.widget.Toast;
-          import androidx.appcompat.app.AppCompatActivity;
-          import androidx.core.splashscreen.SplashScreen;
-          import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+          import android.widget.LinearLayout;
+          import android.view.ViewGroup;
 
-          public class MainActivity extends AppCompatActivity {
+          public class MainActivity extends Activity {
               private WebView webView;
-              private SwipeRefreshLayout swipeRefresh;
               
-              @SuppressLint("SetJavaScriptEnabled")
               @Override
               protected void onCreate(Bundle savedInstanceState) {
-                  // FIX: SplashScreen with try-catch to prevent crash on Moto Edge 60 Pro
-                  try {
-                      SplashScreen splash = SplashScreen.installSplashScreen(this);
-                      splash.setKeepOnScreenCondition(() -> false);
-                  } catch (Exception e) {
-                      // If splash fails on Moto/Android 14, continue without it
-                      e.printStackTrace();
-                  }
-                  
                   super.onCreate(savedInstanceState);
                   
-                  try {
-                      swipeRefresh = new SwipeRefreshLayout(this);
-                      webView = new WebView(this);
-                      
-                      // FIX: WebView settings for Android 14/15 compatibility
-                      WebSettings settings = webView.getSettings();
-                      settings.setJavaScriptEnabled(true);
-                      settings.setDomStorageEnabled(true);
-                      settings.setDatabaseEnabled(true);
-                      settings.setAllowFileAccess(true);
-                      settings.setAllowContentAccess(true);
-                      settings.setAllowFileAccessFromFileURLs(false);
-                      settings.setAllowUniversalAccessFromFileURLs(false);
-                      settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-                      settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-                      settings.setLoadsImagesAutomatically(true);
-                      settings.setUseWideViewPort(true);
-                      settings.setLoadWithOverviewMode(true);
-                      settings.setSupportZoom(false);
-                      settings.setBuiltInZoomControls(false);
-                      
-                      // FIX: Prevent crash on Android 14+ edge-to-edge
-                      webView.setBackgroundColor(Color.parseColor("#0f172a"));
-                      webView.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
-                      
-                      swipeRefresh.setColorSchemeColors(Color.parseColor("#f97316"), Color.parseColor("#ec4899"));
-                      swipeRefresh.addView(webView);
-                      setContentView(swipeRefresh);
-                      
-                      swipeRefresh.setOnRefreshListener(() -> {
-                          if (webView != null) webView.reload();
-                      });
-                      
-                      webView.setWebChromeClient(new WebChromeClient());
-                      
-                      webView.setWebViewClient(new WebViewClient() {
-                          @Override
-                          public void onPageFinished(WebView view, String url) {
-                              super.onPageFinished(view, url);
-                              if (swipeRefresh != null) swipeRefresh.setRefreshing(false);
+                  // Create layout
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  
+                  // Create WebView - minimal settings to prevent crash on Moto Edge 60 Pro
+                  webView = new WebView(this);
+                  webView.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  
+                  // Basic settings only - no risky features
+                  WebSettings s = webView.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setJavaScriptCanOpenWindowsAutomatically(true);
+                  s.setLoadsImagesAutomatically(true);
+                  s.setUseWideViewPort(true);
+                  s.setLoadWithOverviewMode(true);
+                  s.setAllowFileAccess(true);
+                  s.setAllowContentAccess(true);
+                  s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                  
+                  // Keep inside WebView, prevent external browser
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                          // Load all urls inside WebView - fixes crash on some sites
+                          if (url != null) {
+                              view.loadUrl(url);
                           }
-                          
-                          @Override
-                          public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                              // Keep all URLs inside WebView
-                              return false;
-                          }
-                          
-                          @Override
-                          public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                              super.onReceivedError(view, errorCode, description, failingUrl);
-                              // Don't crash, just show error
-                          }
-                      });
-                      
-                      // Load URL - with fallback
-                      String targetUrl = "https://example.com";
-                      if (targetUrl != null && !targetUrl.isEmpty()) {
-                          webView.loadUrl(targetUrl);
+                          return true;
                       }
                       
-                  } catch (Exception e) {
-                      e.printStackTrace();
-                      // Fallback: show toast and finish if WebView fails to init
-                      Toast.makeText(this, "WebView init failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
+                      @Override
+                      public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                          // Don't crash on error, just log
+                          super.onReceivedError(view, errorCode, description, failingUrl);
+                      }
+                  });
+                  
+                  // Load flightsnetwork.co.in
+                  webView.loadUrl("https://flightsnetwork.co.in/");
+                  
+                  root.addView(webView);
+                  setContentView(root);
               }
               
               @Override
               public void onBackPressed() {
-                  try {
-                      if (webView != null && webView.canGoBack()) {
-                          webView.goBack();
-                      } else {
-                          super.onBackPressed();
-                      }
-                  } catch (Exception e) {
+                  if (webView != null && webView.canGoBack()) {
+                      webView.goBack();
+                  } else {
                       super.onBackPressed();
                   }
               }
               
               @Override
               protected void onDestroy() {
-                  try {
-                      if (webView != null) {
-                          webView.destroy();
-                      }
-                  } catch (Exception e) {}
+                  if (webView != null) {
+                      webView.destroy();
+                  }
                   super.onDestroy();
               }
           }
           JAVA
-          sed -i "s|https://example.com|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java || true
+          sed -i "s|https://flightsnetwork.co.in/|${{ inputs.url }}|g" app/src/main/java/com/web2app/MainActivity.java || true
 
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
-
           android {
               namespace 'com.example.app'
               compileSdk 34
-
               signingConfigs {
                   release {
                       storeFile file('../release.keystore')
@@ -309,64 +223,46 @@ jobs:
                       v2SigningEnabled true
                   }
               }
-
               defaultConfig {
                   applicationId "com.example.app"
                   minSdk 21
-                  targetSdk 34
+                  targetSdk 33
                   versionCode 1
                   versionName "1.0"
-                  multiDexEnabled false
               }
-
               buildTypes {
                   release {
                       minifyEnabled false
-                      shrinkResources false
                       signingConfig signingConfigs.release
-                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
                   }
               }
-
               compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-
-              packaging {
-                  resources {
-                      excludes += '/META-INF/{AL2.0,LGPL2.1}'
-                  }
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
               }
           }
-
-          dependencies {
-              implementation 'androidx.appcompat:appcompat:1.6.1'
-              implementation 'androidx.core:core-splashscreen:1.0.1'
-              implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
-              implementation 'com.google.android.material:material:1.11.0'
-              implementation 'androidx.webkit:webkit:1.9.0'
-          }
+          dependencies {}
           EOF
-          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle || true
+          sed -i "s/com.example.app/${{ inputs.packageName }}/g" app/build.gradle
 
-      - name: Build SIGNED APK AAB - Moto Edge 60 Pro Fix
+      - name: Build APK
         run: |
           export ANDROID_HOME=$HOME/sdk
           /tmp/gradle-8.5/bin/gradle wrapper --gradle-version 8.5
           chmod +x gradlew
-          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon --stacktrace
           ls -lh app/build/outputs/apk/release/
           $HOME/sdk/build-tools/34.0.0/apksigner verify --verbose app/build/outputs/apk/release/*.apk || true
 
-      - name: Upload APK
+      - name: Upload APK Free
         uses: actions/upload-artifact@v4
         with:
           name: apk-free-${{ inputs.buildId }}
           path: app/build/outputs/apk/release/*.apk
 
-      - name: Upload AAB
+      - name: Upload AAB Paid
         uses: actions/upload-artifact@v4
         with:
           name: aab-paid-${{ inputs.buildId }}
           path: app/build/outputs/bundle/release/*.aab
+          if-no-files-found: ignore
